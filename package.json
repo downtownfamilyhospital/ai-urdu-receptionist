@@ -1,0 +1,20 @@
+{
+  "name": "ai-urdu-hospital-receptionist",
+  "version": "1.0.0",
+  "description": "AI Urdu Hospital Receptionist - Phase 1 (text)",
+  "main": "src/server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "axios": "^1.7.2",
+    "openai": "^4.52.0",
+    "google-spreadsheet": "^4.1.2",
+    "google-auth-library": "^9.10.0",
+    "dotenv": "^16.4.5",
+    "better-sqlite3": "^11.0.0"
+  }
+}
