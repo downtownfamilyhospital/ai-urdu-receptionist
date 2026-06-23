@@ -1,71 +1,68 @@
 // =========================================================
 //  database.js
-//  Stores leads (every patient inquiry) in a small local
-//  database file (SQLite). No external database needed.
-//  Also keeps short conversation history per patient.
+//  Stores leads (every patient inquiry) and short
+//  conversation history. Uses a simple JSON file (lowdb) —
+//  no compiling needed, installs instantly, works on Railway.
 // =========================================================
 
-import Database from "better-sqlite3";
+import { JSONFilePreset } from "lowdb/node";
 
-const db = new Database("hospital.db");
+// Create / open the data file with starting structure.
+const db = await JSONFilePreset("hospital.json", { leads: [], messages: [] });
 
-// Create the tables the first time the app runs.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS leads (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    patient_name TEXT,
-    whatsapp_number TEXT,
-    inquiry TEXT,
-    department TEXT,
-    intent TEXT,
-    needs_human INTEGER DEFAULT 0,
-    status TEXT DEFAULT 'new',
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-
-  CREATE TABLE IF NOT EXISTS messages (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    whatsapp_number TEXT,
-    role TEXT,          -- 'user' or 'assistant'
-    content TEXT,
-    created_at TEXT DEFAULT (datetime('now'))
-  );
-`);
-
-export function saveLead({ patient_name, whatsapp_number, inquiry, department, intent, needs_human }) {
-  db.prepare(`
-    INSERT INTO leads (patient_name, whatsapp_number, inquiry, department, intent, needs_human)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(patient_name || "", whatsapp_number, inquiry, department || "", intent || "general", needs_human ? 1 : 0);
+function nowISO() {
+  return new Date().toISOString();
 }
 
-export function saveMessage(whatsapp_number, role, content) {
-  db.prepare(`INSERT INTO messages (whatsapp_number, role, content) VALUES (?, ?, ?)`)
-    .run(whatsapp_number, role, content);
+export async function saveLead({ patient_name, whatsapp_number, inquiry, department, intent, needs_human }) {
+  db.data.leads.push({
+    id: db.data.leads.length + 1,
+    patient_name: patient_name || "",
+    whatsapp_number,
+    inquiry,
+    department: department || "",
+    intent: intent || "general",
+    needs_human: needs_human ? 1 : 0,
+    status: "new",
+    created_at: nowISO(),
+  });
+  await db.write();
+}
+
+export async function saveMessage(whatsapp_number, role, content) {
+  db.data.messages.push({
+    whatsapp_number,
+    role,
+    content,
+    created_at: nowISO(),
+  });
+  await db.write();
 }
 
 // Get the last few messages so the AI remembers the conversation.
 export function getRecentHistory(whatsapp_number, limit = 6) {
-  const rows = db.prepare(`
-    SELECT role, content FROM messages
-    WHERE whatsapp_number = ?
-    ORDER BY id DESC LIMIT ?
-  `).all(whatsapp_number, limit);
-  return rows.reverse().map((r) => ({ role: r.role, content: r.content }));
+  const all = db.data.messages.filter((m) => m.whatsapp_number === whatsapp_number);
+  return all.slice(-limit).map((m) => ({ role: m.role, content: m.content }));
 }
 
 // Simple stats for the dashboard.
 export function getStats() {
-  const total = db.prepare(`SELECT COUNT(*) c FROM leads`).get().c;
-  const pending = db.prepare(`SELECT COUNT(*) c FROM leads WHERE status='new'`).get().c;
-  const needHuman = db.prepare(`SELECT COUNT(*) c FROM leads WHERE needs_human=1`).get().c;
-  const byDept = db.prepare(`
-    SELECT department, COUNT(*) c FROM leads
-    WHERE department != '' GROUP BY department ORDER BY c DESC
-  `).all();
-  const recent = db.prepare(`
-    SELECT patient_name, whatsapp_number, inquiry, department, intent, needs_human, created_at
-    FROM leads ORDER BY id DESC LIMIT 50
-  `).all();
+  const leads = db.data.leads;
+  const total = leads.length;
+  const pending = leads.filter((l) => l.status === "new").length;
+  const needHuman = leads.filter((l) => l.needs_human === 1).length;
+
+  const deptCounts = {};
+  for (const l of leads) {
+    if (l.department && l.department !== "") {
+      deptCounts[l.department] = (deptCounts[l.department] || 0) + 1;
+    }
+  }
+  const byDept = Object.entries(deptCounts)
+    .map(([department, c]) => ({ department, c }))
+    .sort((a, b) => b.c - a.c);
+
+  const recent = [...leads].reverse().slice(0, 50);
+
   return { total, pending, needHuman, byDept, recent };
 }
