@@ -48,7 +48,9 @@ app.post("/webhook", async (req, res) => {
     const message = entry?.messages?.[0];
     if (!message) return; // could be a status update, ignore
 
-    const from = message.from;               // patient's WhatsApp number
+    const from = message.from;               // patient's WhatsApp number (e.g. 923xxxxxxxxx)
+    // Standardize to international format with + prefix, no dashes.
+    const fromFormatted = from.startsWith("+") ? from : `+${from}`;
     const profileName = entry?.contacts?.[0]?.profile?.name || "";
 
     // --- AD REFERRAL: did this patient arrive by clicking a Meta ad? ---
@@ -96,6 +98,20 @@ app.post("/webhook", async (req, res) => {
         );
         return;
       }
+    } else if (message.type === "location") {
+      // Patient shared a GPS location pin — save it to their record.
+      const lat = message.location?.latitude;
+      const lng = message.location?.longitude;
+      const pin = lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : "";
+      if (pin) {
+        await savePatientMemory(fromFormatted, { pin_location: pin });
+        console.log(`📍 ${from}: location pin saved`);
+      }
+      await sendText(
+        from,
+        "شکریہ! 🌸 آپ کی لوکیشن موصول ہو گئی ہے۔ ہماری ٹیم اسی پتے پر سروس بھیج دے گی۔"
+      );
+      return;
     } else {
       // images, documents, etc. — not handled yet
       await sendText(
@@ -111,7 +127,7 @@ app.post("/webhook", async (req, res) => {
     const knowledge = await loadKnowledge();
 
     // 1b. Look up if we already know this patient (returning patient memory)
-    const patientMemory = await getPatientMemory(from);
+    const patientMemory = await getPatientMemory(fromFormatted);
 
     // 2. Get recent conversation so the AI remembers context
     const history = getRecentHistory(from);
@@ -134,7 +150,7 @@ app.post("/webhook", async (req, res) => {
     saveMessage(from, "assistant", reply);
     saveLead({
       patient_name: meta.patient_name || profileName,
-      whatsapp_number: from,
+      whatsapp_number: fromFormatted,
       inquiry: patientText,
       department: meta.department,
       intent: meta.intent,
@@ -145,15 +161,15 @@ app.post("/webhook", async (req, res) => {
     await sendText(from, reply);
     console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
 
-    // 5b. Remember this patient (name/address) for ~1 week, so we
-    //     don't re-ask next time. Save whenever we learn their name.
-    if (meta.patient_name || meta.lead_complete) {
-      await savePatientMemory(from, {
-        name: meta.patient_name || profileName,
-        address: meta.address || "",
-        last_service: meta.department || "",
-      });
-    }
+    // 5b. ALWAYS remember this patient in the Google Sheet (name +
+    //     WhatsApp + address) for future correspondence & campaigns.
+    //     Number stored in clean international format (+923...).
+    await savePatientMemory(fromFormatted, {
+      name: meta.patient_name || profileName || "",
+      address: meta.address || "",
+      pin_location: meta.pin_location || "",
+      last_service: meta.department || "",
+    });
 
     // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
     //    (For now we LOG it so we can test collection. Manager delivery
