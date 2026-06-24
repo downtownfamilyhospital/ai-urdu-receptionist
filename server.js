@@ -115,6 +115,18 @@ app.post("/webhook", async (req, res) => {
     // 5. Send the Urdu reply back
     await sendText(from, reply);
     console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
+
+    // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
+    //    (For now we LOG it so we can test collection. Manager delivery
+    //     via WhatsApp template is the next step once this works.)
+    if (meta.lead_complete && meta.lead_summary) {
+      const dept = meta.department || "general";
+      console.log("==================================================");
+      console.log(`✅ LEAD COMPLETE → department: ${dept}`);
+      console.log(`👤 Patient: ${meta.patient_name || profileName} (${from})`);
+      console.log(`📋 Summary for manager:\n${meta.lead_summary}`);
+      console.log("==================================================");
+    }
   } catch (err) {
     console.error("Webhook error:", err);
   }
