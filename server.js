@@ -50,6 +50,21 @@ app.post("/webhook", async (req, res) => {
     const from = message.from;               // patient's WhatsApp number
     const profileName = entry?.contacts?.[0]?.profile?.name || "";
 
+    // --- AD REFERRAL: did this patient arrive by clicking a Meta ad? ---
+    // Meta includes a "referral" object on the FIRST message after an ad click.
+    let adContext = "";
+    if (message.referral) {
+      const r = message.referral;
+      const headline = r.headline || "";
+      const body = r.body || "";
+      const source = r.source_type || r.source_id || "";
+      adContext =
+        `(The patient just arrived by clicking a Meta ad. ` +
+        `Ad headline: "${headline}". Ad text: "${body}". ` +
+        `Warmly acknowledge this specific ad/service, give relevant info, and convince them to visit.)`;
+      console.log(`📣 Ad click! headline="${headline}" body="${body.slice(0, 60)}"`);
+    }
+
     // Work out what the patient "said" as text.
     // - text message  → use it directly
     // - voice note     → transcribe with Whisper (Phase 2A)
@@ -97,8 +112,9 @@ app.post("/webhook", async (req, res) => {
     // 2. Get recent conversation so the AI remembers context
     const history = getRecentHistory(from);
 
-    // 3. Ask the AI brain
-    const { reply, meta } = await askBrain(patientText, knowledge, history);
+    // 3. Ask the AI brain (include ad context if they came from an ad)
+    const brainInput = adContext ? `${adContext}\n\nPatient says: ${patientText}` : patientText;
+    const { reply, meta } = await askBrain(brainInput, knowledge, history);
 
     // 4. Save everything
     saveMessage(from, "user", patientText);
