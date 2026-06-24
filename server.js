@@ -11,6 +11,7 @@ import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
 import { sendText } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
+import { getPatientMemory, savePatientMemory } from "./patients.js";
 import {
   saveLead,
   saveMessage,
@@ -109,11 +110,23 @@ app.post("/webhook", async (req, res) => {
     // 1. Load hospital knowledge from Google Sheets
     const knowledge = await loadKnowledge();
 
+    // 1b. Look up if we already know this patient (returning patient memory)
+    const patientMemory = await getPatientMemory(from);
+
     // 2. Get recent conversation so the AI remembers context
     const history = getRecentHistory(from);
 
-    // 3. Ask the AI brain (include ad context if they came from an ad)
-    const brainInput = adContext ? `${adContext}\n\nPatient says: ${patientText}` : patientText;
+    // 3. Ask the AI brain (include patient memory + ad context + current time)
+    const pktTime = new Date().toLocaleString("en-US", {
+      timeZone: "Asia/Karachi",
+      weekday: "long",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+    let brainInput = `(ABHI ka time: ${pktTime} — Pakistan)\n\n${patientText}`;
+    if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
+    if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledge, history);
 
     // 4. Save everything
@@ -131,6 +144,16 @@ app.post("/webhook", async (req, res) => {
     // 5. Send the Urdu reply back
     await sendText(from, reply);
     console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
+
+    // 5b. Remember this patient (name/address) for ~1 week, so we
+    //     don't re-ask next time. Save whenever we learn their name.
+    if (meta.patient_name || meta.lead_complete) {
+      await savePatientMemory(from, {
+        name: meta.patient_name || profileName,
+        address: meta.address || "",
+        last_service: meta.department || "",
+      });
+    }
 
     // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
     //    (For now we LOG it so we can test collection. Manager delivery
