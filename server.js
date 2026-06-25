@@ -14,7 +14,7 @@ import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
-import { runCampaign } from "./campaign.js";
+import { runCampaign, getApprovedTemplates } from "./campaign.js";
 import { getAllPatients } from "./patients.js";
 import {
   saveLead,
@@ -377,23 +377,27 @@ app.get("/dashboard", (req, res) => res.redirect("/portal"));
 app.get("/portal/campaign", async (req, res) => {
   if (!isLoggedIn(req)) return res.send(loginPage());
   const patients = await getAllPatients();
+  const templates = await getApprovedTemplates();
+
+  const options = templates.length
+    ? templates.map((t) => `<option value="${t.name}|${t.language}">${t.name} (${t.category}, ${t.language})</option>`).join("")
+    : `<option value="">No approved templates found</option>`;
+
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Campaign</title>
   <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9}
   header{background:#0d6efd;color:#fff;padding:13px 18px;display:flex;justify-content:space-between}
   header a{color:#fff;text-decoration:none}.wrap{max-width:620px;margin:0 auto;padding:22px}
   .card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px #0001}
-  input,textarea{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
+  input,textarea,select{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
   button{padding:11px 22px;background:#0d6efd;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:15px}
   .warn{background:#fff3cd;border:1px solid #ffe69c;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px}</style></head><body>
   <header><a href="/portal">← Back</a><b>📣 Campaign</b><span></span></header>
   <div class="wrap"><div class="card">
-    <div class="warn">⚠️ This sends a Meta-approved <b>marketing template</b> to your <b>${patients.length}</b> existing patients (who messaged you before). Each message costs the marketing rate. Only opted-in patients — never upload outside lists.</div>
-    <form method="POST" action="/portal/campaign/send" onsubmit="return confirm('Send to ${patients.length} patients? This will incur marketing charges.')">
-      <label>Marketing template name (approved in Meta):</label>
-      <input name="template" placeholder="e.g. camp_offer" required>
-      <label>Template language code:</label>
-      <input name="lang" value="en" required>
-      <label>Offer/camp detail (fills {{1}} in template, optional):</label>
+    <div class="warn">⚠️ This sends an approved template to your <b>${patients.length}</b> existing patients (who messaged you before). Marketing templates cost the marketing rate; utility templates cost the utility rate. Only opted-in patients — never upload outside lists.</div>
+    <form method="POST" action="/portal/campaign/send" onsubmit="return confirm('Send to ${patients.length} patients? This will incur charges.')">
+      <label>Choose an approved template:</label>
+      <select name="template_combo" required>${options}</select>
+      <label>Message detail (fills {{1}} if your template has a blank, optional):</label>
       <textarea name="param" rows="3" placeholder="e.g. Free Gynae Camp, 25 June, 10am-2pm. Book now!"></textarea>
       <button>Send Campaign</button>
     </form>
@@ -402,7 +406,8 @@ app.get("/portal/campaign", async (req, res) => {
 
 app.post("/portal/campaign/send", async (req, res) => {
   if (!isLoggedIn(req)) return res.send(loginPage());
-  const { template, lang, param } = req.body;
+  const { template_combo, param } = req.body;
+  const [template, lang] = (template_combo || "|en").split("|");
   const result = await runCampaign(template, lang || "en", param || "");
   res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Campaign Sent</title>
   <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9}
