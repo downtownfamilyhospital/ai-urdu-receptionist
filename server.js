@@ -17,10 +17,14 @@ import {
   saveMessage,
   getRecentHistory,
   getStats,
+  getConversations,
+  getConversation,
+  getPatientLead,
 } from "./database.js";
 
 const app = express();
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 
 // ---- Health check (so you can confirm the server is alive) ----
 app.get("/", (req, res) => {
@@ -187,53 +191,147 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
-// ---- Simple admin dashboard (just open it in a browser) ----
-app.get("/dashboard", (req, res) => {
-  const s = getStats();
-  const deptRows = s.byDept
-    .map((d) => `<tr><td>${d.department}</td><td>${d.c}</td></tr>`)
-    .join("");
-  const leadRows = s.recent
-    .map(
-      (l) => `<tr>
-        <td>${l.created_at}</td>
-        <td>${l.patient_name || "-"}</td>
-        <td>${l.whatsapp_number}</td>
-        <td>${l.department || "-"}</td>
-        <td>${l.intent}</td>
-        <td>${l.needs_human ? "🔴 yes" : "no"}</td>
-        <td>${(l.inquiry || "").slice(0, 50)}</td>
-      </tr>`
-    )
-    .join("");
+// =========================================================
+//  ADMIN PORTAL  — login-protected
+//  Routes: /portal (login + dashboard), /portal/chat/:number,
+//          /portal/reply, /portal/login, /portal/logout
+//  Login uses ADMIN_USER + ADMIN_PASS from Railway variables.
+// =========================================================
 
-  res.send(`<!doctype html><html><head><meta charset="utf-8">
-  <title>DFH Receptionist Dashboard</title>
-  <style>
-    body{font-family:system-ui,Arial;margin:24px;background:#f6f7f9;color:#1a1a1a}
-    h1{font-size:22px}
-    .cards{display:flex;gap:16px;margin:16px 0}
-    .card{background:#fff;border-radius:12px;padding:18px 22px;box-shadow:0 1px 4px #0001}
-    .card .n{font-size:30px;font-weight:700}
-    table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;margin-top:12px}
-    th,td{padding:8px 10px;text-align:left;border-bottom:1px solid #eee;font-size:13px}
-    th{background:#0d6efd;color:#fff}
-  </style></head><body>
-    <h1>🏥 Downtown Family Hospital — Receptionist Dashboard</h1>
+const PORTAL_COOKIE = "dfh_portal";
+function isLoggedIn(req) {
+  const cookie = req.headers.cookie || "";
+  return cookie.includes(`${PORTAL_COOKIE}=${process.env.ADMIN_PASS}`);
+}
+function loginPage(msg = "") {
+  return `<!doctype html><html><head><meta charset="utf-8"><title>DFH Portal Login</title>
+  <style>body{font-family:system-ui,Arial;background:#0d6efd;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+  .box{background:#fff;padding:32px;border-radius:14px;box-shadow:0 8px 30px #0003;width:300px}
+  h2{margin:0 0 18px}input{width:100%;padding:10px;margin:6px 0;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
+  button{width:100%;padding:11px;background:#0d6efd;color:#fff;border:0;border-radius:8px;font-size:15px;cursor:pointer;margin-top:8px}
+  .err{color:#c00;font-size:13px}</style></head><body>
+  <form class="box" method="POST" action="/portal/login">
+    <h2>🏥 DFH Portal</h2>
+    <div class="err">${msg}</div>
+    <input name="user" placeholder="Username" autocomplete="off">
+    <input name="pass" type="password" placeholder="Password">
+    <button>Login</button>
+  </form></body></html>`;
+}
+
+app.post("/portal/login", (req, res) => {
+  if (req.body.user === process.env.ADMIN_USER && req.body.pass === process.env.ADMIN_PASS) {
+    res.setHeader("Set-Cookie", `${PORTAL_COOKIE}=${process.env.ADMIN_PASS}; HttpOnly; Path=/; Max-Age=86400`);
+    return res.redirect("/portal");
+  }
+  res.send(loginPage("Galat username ya password"));
+});
+
+app.get("/portal/logout", (req, res) => {
+  res.setHeader("Set-Cookie", `${PORTAL_COOKIE}=; HttpOnly; Path=/; Max-Age=0`);
+  res.redirect("/portal");
+});
+
+// Main portal: stats + department analytics + conversation list
+app.get("/portal", (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  const s = getStats();
+  const convos = getConversations();
+
+  const deptRows = s.byDept
+    .map((d) => `<tr><td>${d.department}</td><td>${d.c}</td></tr>`).join("");
+  const convoRows = convos
+    .map((c) => `<tr onclick="location.href='/portal/chat/${encodeURIComponent(c.whatsapp_number)}'" style="cursor:pointer">
+      <td>${c.whatsapp_number}</td>
+      <td>${(c.last || "").slice(0, 45)}</td>
+      <td>${c.count}</td>
+      <td>${new Date(c.time).toLocaleString("en-GB", { timeZone: "Asia/Karachi" })}</td>
+    </tr>`).join("");
+
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>DFH Portal</title>
+  <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9;color:#1a1a1a}
+  header{background:#0d6efd;color:#fff;padding:14px 22px;display:flex;justify-content:space-between;align-items:center}
+  header a{color:#fff;text-decoration:none;font-size:14px}
+  .wrap{padding:22px}.cards{display:flex;gap:16px;margin:8px 0 20px;flex-wrap:wrap}
+  .card{background:#fff;border-radius:12px;padding:16px 22px;box-shadow:0 1px 4px #0001}
+  .card .n{font-size:28px;font-weight:700}
+  table{width:100%;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden;margin-top:10px}
+  th,td{padding:9px 11px;text-align:left;border-bottom:1px solid #eee;font-size:13px}
+  th{background:#0d6efd;color:#fff}h3{margin:22px 0 4px}
+  .grid{display:grid;grid-template-columns:1fr 2fr;gap:24px}</style></head><body>
+  <header><b>🏥 Downtown Family Hospital — Admin Portal</b><a href="/portal/logout">Logout</a></header>
+  <div class="wrap">
     <div class="cards">
       <div class="card"><div class="n">${s.total}</div>Total inquiries</div>
       <div class="card"><div class="n">${s.pending}</div>Pending leads</div>
       <div class="card"><div class="n">${s.needHuman}</div>Need human</div>
+      <div class="card"><div class="n">${convos.length}</div>Conversations</div>
     </div>
-    <h3>Department-wise inquiries</h3>
-    <table><tr><th>Department</th><th>Count</th></tr>${deptRows || "<tr><td colspan=2>No data yet</td></tr>"}</table>
-    <h3>Recent leads</h3>
-    <table>
-      <tr><th>Time</th><th>Name</th><th>Number</th><th>Dept</th><th>Intent</th><th>Human?</th><th>Inquiry</th></tr>
-      ${leadRows || "<tr><td colspan=7>No leads yet</td></tr>"}
-    </table>
-  </body></html>`);
+    <div class="grid">
+      <div>
+        <h3>Department-wise</h3>
+        <table><tr><th>Department</th><th>Count</th></tr>${deptRows || "<tr><td colspan=2>No data</td></tr>"}</table>
+      </div>
+      <div>
+        <h3>Conversations (click to open)</h3>
+        <table><tr><th>Number</th><th>Last message</th><th>Msgs</th><th>Time</th></tr>
+        ${convoRows || "<tr><td colspan=4>No conversations yet</td></tr>"}</table>
+      </div>
+    </div>
+  </div></body></html>`);
 });
+
+// View one conversation + reply box
+app.get("/portal/chat/:number", (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  const number = req.params.number;
+  const msgs = getConversation(number);
+  const lead = getPatientLead(number);
+
+  const bubbles = msgs.map((m) => {
+    const mine = m.role === "assistant";
+    return `<div style="display:flex;justify-content:${mine ? "flex-end" : "flex-start"};margin:6px 0">
+      <div style="max-width:70%;padding:9px 13px;border-radius:12px;font-size:14px;
+      background:${mine ? "#0d6efd" : "#fff"};color:${mine ? "#fff" : "#000"};box-shadow:0 1px 3px #0001;white-space:pre-wrap">${m.content}</div>
+    </div>`;
+  }).join("");
+
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Chat ${number}</title>
+  <style>body{font-family:system-ui,Arial;margin:0;background:#e9edf2}
+  header{background:#0d6efd;color:#fff;padding:13px 18px;display:flex;justify-content:space-between;align-items:center}
+  header a{color:#fff;text-decoration:none}.chat{max-width:760px;margin:0 auto;padding:16px}
+  .info{background:#fff;border-radius:10px;padding:10px 14px;font-size:13px;margin-bottom:10px}
+  form{display:flex;gap:8px;margin-top:12px}
+  input[type=text]{flex:1;padding:11px;border:1px solid #ccc;border-radius:24px}
+  button{padding:11px 20px;background:#0d6efd;color:#fff;border:0;border-radius:24px;cursor:pointer}</style></head><body>
+  <header><a href="/portal">← Back</a><b>${number}</b><span></span></header>
+  <div class="chat">
+    <div class="info">${lead ? `Name: ${lead.patient_name || "-"} | Dept: ${lead.department || "-"} | Intent: ${lead.intent || "-"}` : "No lead info yet"}</div>
+    ${bubbles || "<p>No messages.</p>"}
+    <form method="POST" action="/portal/reply">
+      <input type="hidden" name="number" value="${number}">
+      <input type="text" name="text" placeholder="Type a reply (within 24h)..." autocomplete="off" required>
+      <button>Send</button>
+    </form>
+    <p style="font-size:12px;color:#888;text-align:center;margin-top:8px">Note: WhatsApp allows free replies only within 24h of the patient's last message.</p>
+  </div></body></html>`);
+});
+
+// Send a manual reply from the portal
+app.post("/portal/reply", async (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  const { number, text } = req.body;
+  if (number && text) {
+    // strip the + for the WhatsApp API (it wants digits only)
+    const to = number.replace(/^\+/, "");
+    await sendText(to, text);
+    saveMessage(number, "assistant", text);
+  }
+  res.redirect(`/portal/chat/${encodeURIComponent(number)}`);
+});
+
+// Keep old /dashboard working (redirect to new portal)
+app.get("/dashboard", (req, res) => res.redirect("/portal"));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
