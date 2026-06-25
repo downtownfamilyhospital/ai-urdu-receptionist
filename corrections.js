@@ -31,22 +31,24 @@ async function getCorrectionsSheet() {
   if (!sheet) {
     sheet = await doc.addSheet({
       title: CORRECTIONS_TAB,
-      headerValues: ["correction", "added_by", "added_at"],
+      headerValues: ["correction", "expires", "added_by", "added_at"],
     });
   }
   return sheet;
 }
 
-// Save a new correction (called when admin sends "zainab zainab ...").
-export async function saveCorrection(text, addedBy) {
+// Save a new correction. expires is optional (YYYY-MM-DD); after that
+// date the correction is ignored automatically.
+export async function saveCorrection(text, addedBy, expires = "") {
   try {
     const sheet = await getCorrectionsSheet();
     await sheet.addRow({
       correction: text,
+      expires: expires || "",
       added_by: addedBy,
       added_at: new Date().toISOString(),
     });
-    cache = null; // force refresh so it applies right away
+    cache = null;
     return true;
   } catch (e) {
     console.error("saveCorrection error:", e.message);
@@ -68,9 +70,14 @@ export async function loadCorrections() {
       return "";
     }
     let text = "\n== انتظامیہ کی طرف سے اصلاحات (ہمیشہ ان پر عمل کریں) ==\n";
+    const todayStr = new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" }); // YYYY-MM-DD
     for (const row of rows) {
       const c = row.get("correction");
-      if (c) text += `- ${c}\n`;
+      if (!c) continue;
+      const expires = (row.get("expires") || "").trim();
+      // If an expiry date is set and it's already past, skip this correction.
+      if (expires && expires < todayStr) continue;
+      text += `- ${c}\n`;
     }
     cache = text;
     cacheTime = now;
