@@ -235,7 +235,12 @@ app.post("/webhook", async (req, res) => {
       needs_human: meta.needs_human,
     });
 
-    // 5. Send the Urdu reply back
+    // 5. Send the Urdu reply back — UNLESS this is a sales/marketing
+    //    pitch the brain flagged to ignore (stay silent, save cost).
+    if (meta.stay_silent) {
+      console.log(`🤐 ${from}: sales/marketing pitch — staying silent`);
+      return;
+    }
     await sendText(from, reply);
     console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
 
