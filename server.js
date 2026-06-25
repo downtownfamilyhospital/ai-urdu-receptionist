@@ -13,6 +13,7 @@ import { sendText } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
+import { forwardLeadToManager } from "./managers.js";
 import {
   saveLead,
   saveMessage,
@@ -218,6 +219,10 @@ app.post("/webhook", async (req, res) => {
       console.log(`👤 Patient: ${meta.patient_name || profileName} (${from})`);
       console.log(`📋 Summary for manager:\n${meta.lead_summary}`);
       console.log("==================================================");
+
+      // Forward the lead to the relevant department manager's WhatsApp.
+      const fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name || profileName}`;
+      await forwardLeadToManager(dept, fullSummary, fromFormatted);
     }
   } catch (err) {
     console.error("Webhook error:", err);
