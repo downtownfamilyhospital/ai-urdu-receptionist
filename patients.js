@@ -101,3 +101,18 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
     console.error("savePatientMemory error:", e.message);
   }
 }
+
+// Get ALL patients (for campaigns to opted-in patients only).
+export async function getAllPatients() {
+  try {
+    const sheet = await getPatientsSheet();
+    const rows = await sheet.getRows();
+    return rows.map((r) => ({
+      number: (r.get("whatsapp_number") || "").replace(/[^0-9]/g, ""),
+      name: r.get("name") || "",
+    })).filter((p) => p.number);
+  } catch (e) {
+    console.error("getAllPatients error:", e.message);
+    return [];
+  }
+}
