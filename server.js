@@ -142,11 +142,26 @@ app.post("/webhook", async (req, res) => {
       if (secret && rest.toLowerCase().startsWith(secret.toLowerCase())) {
         const correctionText = rest.slice(secret.length).trim();
         if (correctionText) {
-          const ok = await saveCorrection(correctionText, from);
+          // Try to find a date in the correction → use as auto-expiry.
+          // Supports: 2026-06-25, 25/6/2026, 25-06-2026, "25 June 2026".
+          let expires = "";
+          const iso = correctionText.match(/(\d{4})-(\d{1,2})-(\d{1,2})/);
+          const dmy = correctionText.match(/\b(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})\b/);
+          const named = correctionText.match(/\b(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})\b/i);
+          const months = { january:1,february:2,march:3,april:4,may:5,june:6,july:7,august:8,september:9,october:10,november:11,december:12 };
+          const pad = (n) => String(n).padStart(2, "0");
+          if (iso) {
+            expires = `${iso[1]}-${pad(iso[2])}-${pad(iso[3])}`;
+          } else if (dmy) {
+            expires = `${dmy[3]}-${pad(dmy[2])}-${pad(dmy[1])}`;
+          } else if (named) {
+            expires = `${named[3]}-${pad(months[named[2].toLowerCase()])}-${pad(named[1])}`;
+          }
+          const ok = await saveCorrection(correctionText, from, expires);
           await sendText(
             from,
             ok
-              ? `شکریہ! ✅ اصلاح محفوظ کر لی گئی ہے، اب میں اس کا خیال رکھوں گی۔\n("${correctionText}")`
+              ? `شکریہ! ✅ اصلاح محفوظ کر لی گئی ہے۔${expires ? ` (یہ ${expires} کے بعد خود بخود ختم ہو جائے گی)` : ""}\n("${correctionText}")`
               : "معذرت، اصلاح محفوظ نہیں ہو سکی۔ دوبارہ کوشش کریں۔"
           );
         } else {
@@ -176,11 +191,14 @@ app.post("/webhook", async (req, res) => {
     const pktTime = new Date().toLocaleString("en-US", {
       timeZone: "Asia/Karachi",
       weekday: "long",
+      year: "numeric",
+      month: "long",
+      day: "numeric",
       hour: "numeric",
       minute: "2-digit",
       hour12: true,
     });
-    let brainInput = `(ABHI ka time: ${pktTime} — Pakistan)\n\n${patientText}`;
+    let brainInput = `(AAJ ki date aur time: ${pktTime} — Pakistan. Hamesha is date/time ka khayal rakhein.)\n\n${patientText}`;
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
