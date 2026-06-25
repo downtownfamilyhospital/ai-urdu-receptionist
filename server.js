@@ -88,21 +88,22 @@ app.post("/webhook", async (req, res) => {
     if (message.type === "text") {
       patientText = message.text.body;
     } else if (message.type === "image") {
-      // Patient sent a photo (prescription / medicine). Host it for a
-      // public link, then let the conversation continue.
+      // Patient sent a photo. Host it for a public link, then let the
+      // CONVERSATION CONTEXT decide the department (don't assume medicine).
       console.log(`🖼️ ${from}: image received, hosting...`);
       try {
         imageLink = await imageToPublicLink(message.image.id);
       } catch (e) {
         console.error("Image host error:", e.message);
       }
-      // Use the caption if any, else a default so the brain knows a photo came.
       const caption = message.image?.caption || "";
+      // Never comment on photo content. Just forward + collect lead info.
       patientText = caption
-        ? `(مریض نے ایک تصویر بھیجی ہے) ${caption}`
-        : "(مریض نے دوا/نسخے کی تصویر بھیجی ہے اور غالباً دستیابی یا قیمت پوچھ رہے ہیں)";
+        ? `(مریض نے ایک تصویر بھیجی ہے، ساتھ یہ لکھا:) ${caption}\n(یاد رہے: تصویر کے مواد پر تبصرہ نہ کریں، صرف کہیں کہ منیجر کو forward کر دی ہے اور باقی معلومات لیں)`
+        : "(مریض نے ایک تصویر بھیجی ہے۔ تصویر کے مواد پر تبصرہ نہ کریں۔ صرف کہیں کہ آپ نے یہ منیجر کو forward کر دی ہے، اور گفتگو کے سیاق سے درست شعبے کی باقی معلومات لیں)";
       if (imageLink) {
-        await savePatientMemory(fromFormatted, { last_service: "pharmacy", image_link: imageLink });
+        // Save the link only (no department assumption).
+        await savePatientMemory(fromFormatted, { image_link: imageLink });
         console.log(`🖼️ → hosted: ${imageLink}`);
       }
     } else if (message.type === "audio") {

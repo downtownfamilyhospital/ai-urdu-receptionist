@@ -9,7 +9,11 @@ import { JWT } from "google-auth-library";
 
 let cache = null;          // we remember the data so we don't re-read every message
 let cacheTime = 0;
-const CACHE_MINUTES = 5;   // refresh from Sheets every 5 minutes
+const CACHE_MINUTES = 30;   // refresh from Sheets every 30 minutes (faster responses)
+
+// Tabs that are NOT hospital knowledge — skip them so the AI prompt
+// stays small and fast (these are data/operational tabs).
+const SKIP_TABS = ["Patients", "Corrections", "Managers"];
 
 // Connect to Google using the "service account" (a robot Google login)
 function getAuth() {
@@ -33,7 +37,7 @@ export async function loadKnowledge() {
 
   let text = "";
   for (const sheet of doc.sheetsByIndex) {
-    if (sheet.title === "Patients") continue; // patient memory, not hospital info
+    if (SKIP_TABS.includes(sheet.title)) continue; // skip data/operational tabs
     text += `\n### ${sheet.title}\n`;
     const rows = await sheet.getRows();
     if (rows.length === 0) {
@@ -50,4 +54,9 @@ export async function loadKnowledge() {
   cache = text;
   cacheTime = now;
   return text;
+}
+
+// Let the app refresh knowledge immediately after a correction is saved.
+export function clearKnowledgeCache() {
+  cache = null;
 }
