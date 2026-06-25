@@ -204,13 +204,19 @@ app.post("/webhook", async (req, res) => {
     const corrections = await loadCorrections();
     const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
 
-    // 1b. Look up if we already know this patient (returning patient memory)
-    const patientMemory = await getPatientMemory(fromFormatted);
-
     // 2. Get recent conversation so the AI remembers context.
     //    Durable (survives restarts) + in-memory fallback.
     let history = await loadConversation(fromFormatted);
     if (!history || history.length === 0) history = getRecentHistory(from);
+
+    // 1b. Returning-patient memory — but ONLY greet "welcome back" on a
+    //     FRESH conversation (no active history). Mid-conversation we just
+    //     use their known details silently, so she doesn't repeat the
+    //     greeting again and again.
+    const isFreshConversation = !history || history.length === 0;
+    const patientMemory = isFreshConversation
+      ? await getPatientMemory(fromFormatted)
+      : "";
 
     // 3. Ask the AI brain (include patient memory + ad context + current time)
     const pktTime = new Date().toLocaleString("en-US", {
