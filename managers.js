@@ -76,35 +76,60 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
     }
 
     for (const to of numbers) {
-      await axios.post(
-        `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: "whatsapp",
-          to,
-          type: "template",
-          template: {
-            name: TEMPLATE_NAME,
-            language: { code: TEMPLATE_LANG },
-            components: [
-              {
-                type: "body",
-                parameters: [
-                  { type: "text", text: dept },
-                  { type: "text", text: summary.slice(0, 1000) },
-                  { type: "text", text: patientNumber },
-                ],
-              },
-            ],
+      try {
+        await axios.post(
+          `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+          {
+            messaging_product: "whatsapp",
+            to,
+            type: "template",
+            template: {
+              name: TEMPLATE_NAME,
+              language: { code: TEMPLATE_LANG },
+              components: [
+                {
+                  type: "body",
+                  parameters: [
+                    { type: "text", text: dept },
+                    { type: "text", text: summary.slice(0, 1000) },
+                    { type: "text", text: patientNumber },
+                  ],
+                },
+              ],
+            },
           },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${ACCESS_TOKEN}`,
-            "Content-Type": "application/json",
-          },
+          {
+            headers: {
+              Authorization: `Bearer ${ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+          }
+        );
+        console.log(`📤 Lead forwarded to ${dept} manager (${to}) via template`);
+      } catch (tplErr) {
+        // Template failed (e.g. not approved in this account / wrong lang).
+        // Log the FULL reason, then try a plain-text message as a fallback
+        // (works if the manager messaged the bot within the last 24h).
+        console.error(
+          `⚠️ Template send failed for ${dept} (${to}):`,
+          JSON.stringify(tplErr.response?.data?.error || tplErr.message)
+        );
+        try {
+          const textBody =
+            `🔔 New ${dept} lead\n\n${summary}\n\nPatient WhatsApp: ${patientNumber}\n\nPlease follow up.`;
+          await axios.post(
+            `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+            { messaging_product: "whatsapp", to, type: "text", text: { body: textBody } },
+            { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
+          );
+          console.log(`📤 Lead forwarded to ${dept} manager (${to}) via plain text (fallback)`);
+        } catch (txtErr) {
+          console.error(
+            `❌ Both template AND text failed for ${dept} (${to}):`,
+            JSON.stringify(txtErr.response?.data?.error || txtErr.message)
+          );
         }
-      );
-      console.log(`📤 Lead forwarded to ${dept} manager (${to})`);
+      }
     }
   } catch (e) {
     console.error("forwardLeadToManager error:", e.response?.data || e.message);
