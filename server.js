@@ -12,6 +12,7 @@ import { askBrain } from "./brain.js";
 import { sendText } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
+import { saveCorrection, loadCorrections } from "./corrections.js";
 import {
   saveLead,
   saveMessage,
@@ -127,8 +128,40 @@ app.post("/webhook", async (req, res) => {
 
     console.log(`📩 ${from}: ${patientText}`);
 
+    // ---- LIVE CORRECTION: "zainab zainab [SECRET] [correction]" ----
+    // Lets trusted people (who know the secret) teach Zainab. The
+    // correction is saved to the Sheet and applied to ALL clients.
+    const lower = patientText.toLowerCase().trim();
+    if (lower.startsWith("zainab zainab")) {
+      const rest = patientText.trim().slice("zainab zainab".length).trim();
+      const secret = process.env.CORRECTION_SECRET || "";
+      // rest should start with the secret word, then the correction
+      if (secret && rest.toLowerCase().startsWith(secret.toLowerCase())) {
+        const correctionText = rest.slice(secret.length).trim();
+        if (correctionText) {
+          const ok = await saveCorrection(correctionText, from);
+          await sendText(
+            from,
+            ok
+              ? `شکریہ! ✅ اصلاح محفوظ کر لی گئی ہے، اب میں اس کا خیال رکھوں گی۔\n("${correctionText}")`
+              : "معذرت، اصلاح محفوظ نہیں ہو سکی۔ دوبارہ کوشش کریں۔"
+          );
+        } else {
+          await sendText(from, "اصلاح خالی ہے۔ مثال: zainab zainab [secret] PRP ki fee 15000 hai");
+        }
+      } else {
+        // wrong/missing secret — treat as normal message (don't reveal the secret exists)
+        await sendText(from, "معذرت، یہ کمانڈ درست نہیں۔");
+      }
+      return; // don't run the normal AI flow for a correction command
+    }
+
     // 1. Load hospital knowledge from Google Sheets
     const knowledge = await loadKnowledge();
+
+    // 1a. Load admin corrections and append — Zainab always obeys these
+    const corrections = await loadCorrections();
+    const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
 
     // 1b. Look up if we already know this patient (returning patient memory)
     const patientMemory = await getPatientMemory(fromFormatted);
@@ -147,7 +180,7 @@ app.post("/webhook", async (req, res) => {
     let brainInput = `(ABHI ka time: ${pktTime} — Pakistan)\n\n${patientText}`;
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
-    const { reply, meta } = await askBrain(brainInput, knowledge, history);
+    const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
 
     // 4. Save everything
     saveMessage(from, "user", patientText);
