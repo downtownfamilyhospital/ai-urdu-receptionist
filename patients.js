@@ -2,7 +2,7 @@
 //  patients.js  — PATIENT MEMORY (stored in Google Sheet)
 //  Remembers each patient (by WhatsApp number): name, address,
 //  last service, and when last seen. So Zainab can RECONFIRM
-//  instead of re-asking. Kept for ~7 days.
+//  instead of re-asking. Kept for ~1000 days.
 // =========================================================
 
 import { GoogleSpreadsheet } from "google-spreadsheet";
@@ -10,6 +10,15 @@ import { JWT } from "google-auth-library";
 
 const REMEMBER_DAYS = 7;
 const PATIENTS_TAB = "Patients";
+
+// Normalize any number to a single canonical form (digits only, no +,
+// no leading zeros) so the SAME person always matches ONE row,
+// regardless of whether it was saved as +923..., 923..., or 03...
+function normalizeNumber(num) {
+  let n = (num || "").replace(/[^0-9]/g, ""); // digits only
+  if (n.startsWith("0")) n = "92" + n.slice(1); // 03xx... → 923xx...
+  return n;
+}
 
 // Read+write auth (note: full spreadsheets scope, not readonly)
 function getAuth() {
@@ -41,7 +50,7 @@ export async function getPatientMemory(whatsappNumber) {
   try {
     const sheet = await getPatientsSheet();
     const rows = await sheet.getRows();
-    const row = rows.find((r) => r.get("whatsapp_number") === whatsappNumber);
+    const row = rows.find((r) => normalizeNumber(r.get("whatsapp_number")) === normalizeNumber(whatsappNumber));
     if (!row) return "";
 
     // Patient data is kept permanently (for future correspondence & campaigns).
@@ -75,7 +84,7 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
   try {
     const sheet = await getPatientsSheet();
     const rows = await sheet.getRows();
-    const existing = rows.find((r) => r.get("whatsapp_number") === whatsappNumber);
+    const existing = rows.find((r) => normalizeNumber(r.get("whatsapp_number")) === normalizeNumber(whatsappNumber));
     const now = new Date().toISOString();
 
     if (existing) {
@@ -89,7 +98,7 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
       await existing.save();
     } else {
       await sheet.addRow({
-        whatsapp_number: whatsappNumber,
+        whatsapp_number: "+" + normalizeNumber(whatsappNumber),
         name: name || "",
         address: address || "",
         pin_location: pin_location || "",
@@ -107,10 +116,15 @@ export async function getAllPatients() {
   try {
     const sheet = await getPatientsSheet();
     const rows = await sheet.getRows();
-    return rows.map((r) => ({
-      number: (r.get("whatsapp_number") || "").replace(/[^0-9]/g, ""),
-      name: r.get("name") || "",
-    })).filter((p) => p.number);
+    const seen = new Set();
+    const out = [];
+    for (const r of rows) {
+      const norm = normalizeNumber(r.get("whatsapp_number"));
+      if (!norm || seen.has(norm)) continue; // skip blanks and duplicates
+      seen.add(norm);
+      out.push({ number: norm, name: r.get("name") || "" });
+    }
+    return out;
   } catch (e) {
     console.error("getAllPatients error:", e.message);
     return [];
