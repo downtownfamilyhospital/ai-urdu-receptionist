@@ -98,10 +98,11 @@ app.post("/webhook", async (req, res) => {
         console.error("Image host error:", e.message);
       }
       const caption = message.image?.caption || "";
-      // Never comment on photo content. Just forward + collect lead info.
+      // Don't claim it's forwarded. Acknowledge receipt, find the right
+      // department + confirm, THEN forward with the completed lead.
       patientText = caption
-        ? `(مریض نے ایک تصویر بھیجی ہے، ساتھ یہ لکھا:) ${caption}\n(یاد رہے: تصویر کے مواد پر تبصرہ نہ کریں، صرف کہیں کہ منیجر کو forward کر دی ہے اور باقی معلومات لیں)`
-        : "(مریض نے ایک تصویر بھیجی ہے۔ تصویر کے مواد پر تبصرہ نہ کریں۔ صرف کہیں کہ آپ نے یہ منیجر کو forward کر دی ہے، اور گفتگو کے سیاق سے درست شعبے کی باقی معلومات لیں)";
+        ? `(مریض نے ایک تصویر بھیجی ہے، ساتھ یہ لکھا:) ${caption}\n(یاد رہے: تصویر کے مواد پر تبصرہ نہ کریں۔ یہ نہ کہیں کہ بھیج دی ہے۔ پہلے درست شعبہ معلوم کریں، باقی معلومات لیں، تصدیق لیں — پھر تصویر confirmed لیڈ کے ساتھ جائے گی)`
+        : "(مریض نے ایک تصویر بھیجی ہے۔ تصویر کے مواد پر تبصرہ نہ کریں، اور یہ نہ کہیں کہ منیجر کو بھیج دی ہے۔ پہلے نرمی سے پوچھیں کہ یہ کس بارے میں ہے [دوا یا جلد/بال] اور کیا جاننا چاہتے ہیں، باقی لیڈ معلومات لیں، خلاصہ دکھا کر تصدیق لیں — تصویر تب confirmed لیڈ کے ساتھ خود بخود جائے گی)";
       if (imageLink) {
         // Save the link only (no department assumption).
         await savePatientMemory(fromFormatted, { image_link: imageLink });
