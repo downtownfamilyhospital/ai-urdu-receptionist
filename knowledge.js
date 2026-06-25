@@ -33,6 +33,7 @@ export async function loadKnowledge() {
 
   let text = "";
   for (const sheet of doc.sheetsByIndex) {
+    if (sheet.title === "Patients") continue; // patient memory, not hospital info
     text += `\n### ${sheet.title}\n`;
     const rows = await sheet.getRows();
     if (rows.length === 0) {
