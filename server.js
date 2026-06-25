@@ -15,6 +15,7 @@ import { imageToPublicLink } from "./images.js";
 import { getPatientMemory, savePatientMemory, getAndClearPatientImage } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
+import { loadConversation, saveConversation, clearConversation, cleanupExpired } from "./conversations.js";
 import { runCampaign, getApprovedTemplates } from "./campaign.js";
 import { getAllPatients } from "./patients.js";
 import {
@@ -205,8 +206,10 @@ app.post("/webhook", async (req, res) => {
     // 1b. Look up if we already know this patient (returning patient memory)
     const patientMemory = await getPatientMemory(fromFormatted);
 
-    // 2. Get recent conversation so the AI remembers context
-    const history = getRecentHistory(from);
+    // 2. Get recent conversation so the AI remembers context.
+    //    Durable (survives restarts) + in-memory fallback.
+    let history = await loadConversation(fromFormatted);
+    if (!history || history.length === 0) history = getRecentHistory(from);
 
     // 3. Ask the AI brain (include patient memory + ad context + current time)
     const pktTime = new Date().toLocaleString("en-US", {
@@ -227,6 +230,8 @@ app.post("/webhook", async (req, res) => {
     // 4. Save everything
     saveMessage(from, "user", patientText);
     saveMessage(from, "assistant", reply);
+    // Durable save (survives restarts) so an interrupted booking resumes
+    await saveConversation(fromFormatted, history, patientText, reply);
     saveLead({
       patient_name: meta.patient_name || profileName,
       whatsapp_number: fromFormatted,
@@ -274,6 +279,9 @@ app.post("/webhook", async (req, res) => {
       if (!leadImage) leadImage = await getAndClearPatientImage(fromFormatted);
       if (leadImage) fullSummary += `\nPatient photo: ${leadImage}`;
       await forwardLeadToManager(dept, fullSummary, fromFormatted);
+      // Lead is done — clear this patient's conversation memory so the
+      // Sheet stays lean and the next chat starts fresh.
+      await clearConversation(fromFormatted);
     }
   } catch (err) {
     console.error("Webhook error:", err);
@@ -472,3 +480,8 @@ app.post("/portal/campaign/send", async (req, res) => {
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+
+// Every hour, remove expired conversation rows so the Sheet stays lean.
+setInterval(() => {
+  cleanupExpired().catch((e) => console.error("cleanup error:", e.message));
+}, 60 * 60 * 1000);
