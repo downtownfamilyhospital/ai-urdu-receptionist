@@ -14,6 +14,8 @@ import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
+import { runCampaign } from "./campaign.js";
+import { getAllPatients } from "./patients.js";
 import {
   saveLead,
   saveMessage,
@@ -297,7 +299,7 @@ app.get("/portal", (req, res) => {
   th,td{padding:9px 11px;text-align:left;border-bottom:1px solid #eee;font-size:13px}
   th{background:#0d6efd;color:#fff}h3{margin:22px 0 4px}
   .grid{display:grid;grid-template-columns:1fr 2fr;gap:24px}</style></head><body>
-  <header><b>🏥 Downtown Family Hospital — Admin Portal</b><a href="/portal/logout">Logout</a></header>
+  <header><b>🏥 Downtown Family Hospital — Admin Portal</b><span><a href="/portal/campaign" style="color:#fff;margin-right:18px">📣 Campaign</a><a href="/portal/logout">Logout</a></span></header>
   <div class="wrap">
     <div class="cards">
       <div class="card"><div class="n">${s.total}</div>Total inquiries</div>
@@ -370,6 +372,49 @@ app.post("/portal/reply", async (req, res) => {
 
 // Keep old /dashboard working (redirect to new portal)
 app.get("/dashboard", (req, res) => res.redirect("/portal"));
+
+// ---- Campaign page: send a marketing template to existing patients ----
+app.get("/portal/campaign", async (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  const patients = await getAllPatients();
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Campaign</title>
+  <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9}
+  header{background:#0d6efd;color:#fff;padding:13px 18px;display:flex;justify-content:space-between}
+  header a{color:#fff;text-decoration:none}.wrap{max-width:620px;margin:0 auto;padding:22px}
+  .card{background:#fff;border-radius:12px;padding:20px;box-shadow:0 1px 4px #0001}
+  input,textarea{width:100%;padding:10px;margin:6px 0 14px;border:1px solid #ccc;border-radius:8px;box-sizing:border-box}
+  button{padding:11px 22px;background:#0d6efd;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:15px}
+  .warn{background:#fff3cd;border:1px solid #ffe69c;padding:10px 14px;border-radius:8px;font-size:13px;margin-bottom:14px}</style></head><body>
+  <header><a href="/portal">← Back</a><b>📣 Campaign</b><span></span></header>
+  <div class="wrap"><div class="card">
+    <div class="warn">⚠️ This sends a Meta-approved <b>marketing template</b> to your <b>${patients.length}</b> existing patients (who messaged you before). Each message costs the marketing rate. Only opted-in patients — never upload outside lists.</div>
+    <form method="POST" action="/portal/campaign/send" onsubmit="return confirm('Send to ${patients.length} patients? This will incur marketing charges.')">
+      <label>Marketing template name (approved in Meta):</label>
+      <input name="template" placeholder="e.g. camp_offer" required>
+      <label>Template language code:</label>
+      <input name="lang" value="en" required>
+      <label>Offer/camp detail (fills {{1}} in template, optional):</label>
+      <textarea name="param" rows="3" placeholder="e.g. Free Gynae Camp, 25 June, 10am-2pm. Book now!"></textarea>
+      <button>Send Campaign</button>
+    </form>
+  </div></div></body></html>`);
+});
+
+app.post("/portal/campaign/send", async (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  const { template, lang, param } = req.body;
+  const result = await runCampaign(template, lang || "en", param || "");
+  res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Campaign Sent</title>
+  <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9}
+  .wrap{max-width:500px;margin:60px auto;text-align:center;background:#fff;padding:30px;border-radius:12px;box-shadow:0 1px 4px #0001}
+  a{color:#0d6efd}</style></head><body><div class="wrap">
+  <h2>📣 Campaign Complete</h2>
+  <p>Total patients: <b>${result.total}</b></p>
+  <p>✅ Sent: <b>${result.sent}</b></p>
+  <p>❌ Failed: <b>${result.failed}</b></p>
+  <p><a href="/portal">← Back to portal</a></p>
+  </div></body></html>`);
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
