@@ -46,6 +46,33 @@ export function getRecentHistory(whatsapp_number, limit = 6) {
 }
 
 // Simple stats for the dashboard.
+// Get a list of all patients who have messaged, with their last message + time.
+export function getConversations() {
+  const byNumber = {};
+  for (const m of db.data.messages) {
+    if (!byNumber[m.whatsapp_number]) {
+      byNumber[m.whatsapp_number] = { whatsapp_number: m.whatsapp_number, last: m.content, time: m.created_at, count: 0 };
+    }
+    byNumber[m.whatsapp_number].last = m.content;
+    byNumber[m.whatsapp_number].time = m.created_at;
+    byNumber[m.whatsapp_number].count++;
+  }
+  return Object.values(byNumber).sort((a, b) => (a.time < b.time ? 1 : -1));
+}
+
+// Get the full conversation for one patient number.
+export function getConversation(whatsapp_number) {
+  return db.data.messages
+    .filter((m) => m.whatsapp_number === whatsapp_number)
+    .map((m) => ({ role: m.role, content: m.content, created_at: m.created_at }));
+}
+
+// Get stats for one patient number (most recent lead info).
+export function getPatientLead(whatsapp_number) {
+  const leads = db.data.leads.filter((l) => l.whatsapp_number === whatsapp_number);
+  return leads.length ? leads[leads.length - 1] : null;
+}
+
 export function getStats() {
   const leads = db.data.leads;
   const total = leads.length;
