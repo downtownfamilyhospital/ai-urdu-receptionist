@@ -11,7 +11,8 @@ import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
 import { sendText } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
-import { getPatientMemory, savePatientMemory } from "./patients.js";
+import { imageToPublicLink } from "./images.js";
+import { getPatientMemory, savePatientMemory, getAndClearPatientImage } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
 import { runCampaign, getApprovedTemplates } from "./campaign.js";
@@ -82,9 +83,28 @@ app.post("/webhook", async (req, res) => {
     // - anything else  → politely ask for text or voice
     let patientText = "";
     let wasVoice = false;
+    let imageLink = ""; // public link if patient sent a photo
 
     if (message.type === "text") {
       patientText = message.text.body;
+    } else if (message.type === "image") {
+      // Patient sent a photo (prescription / medicine). Host it for a
+      // public link, then let the conversation continue.
+      console.log(`🖼️ ${from}: image received, hosting...`);
+      try {
+        imageLink = await imageToPublicLink(message.image.id);
+      } catch (e) {
+        console.error("Image host error:", e.message);
+      }
+      // Use the caption if any, else a default so the brain knows a photo came.
+      const caption = message.image?.caption || "";
+      patientText = caption
+        ? `(مریض نے ایک تصویر بھیجی ہے) ${caption}`
+        : "(مریض نے دوا/نسخے کی تصویر بھیجی ہے اور غالباً دستیابی یا قیمت پوچھ رہے ہیں)";
+      if (imageLink) {
+        await savePatientMemory(fromFormatted, { last_service: "pharmacy", image_link: imageLink });
+        console.log(`🖼️ → hosted: ${imageLink}`);
+      }
     } else if (message.type === "audio") {
       wasVoice = true;
       console.log(`🎤 ${from}: voice note received, transcribing...`);
@@ -241,7 +261,12 @@ app.post("/webhook", async (req, res) => {
       console.log("==================================================");
 
       // Forward the lead to the relevant department manager's WhatsApp.
-      const fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name || profileName}`;
+      let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name || profileName}`;
+      // Attach a photo link: either from this message, or one the
+      // patient sent earlier in the conversation (saved on their record).
+      let leadImage = imageLink;
+      if (!leadImage) leadImage = await getAndClearPatientImage(fromFormatted);
+      if (leadImage) fullSummary += `\nPatient photo: ${leadImage}`;
       await forwardLeadToManager(dept, fullSummary, fromFormatted);
     }
   } catch (err) {

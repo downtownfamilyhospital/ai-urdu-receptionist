@@ -2,7 +2,7 @@
 //  patients.js  — PATIENT MEMORY (stored in Google Sheet)
 //  Remembers each patient (by WhatsApp number): name, address,
 //  last service, and when last seen. So Zainab can RECONFIRM
-//  instead of re-asking. Kept for ~1000 days.
+//  instead of re-asking. Kept for ~7 days.
 // =========================================================
 
 import { GoogleSpreadsheet } from "google-spreadsheet";
@@ -38,7 +38,7 @@ async function getPatientsSheet() {
   if (!sheet) {
     sheet = await doc.addSheet({
       title: PATIENTS_TAB,
-      headerValues: ["whatsapp_number", "name", "address", "pin_location", "last_service", "last_seen"],
+      headerValues: ["whatsapp_number", "name", "address", "pin_location", "last_service", "image_link", "last_seen"],
     });
   }
   return sheet;
@@ -80,7 +80,7 @@ export async function getPatientMemory(whatsappNumber) {
 }
 
 // Save / update a patient's profile after a conversation.
-export async function savePatientMemory(whatsappNumber, { name, address, pin_location, last_service }) {
+export async function savePatientMemory(whatsappNumber, { name, address, pin_location, last_service, image_link } = {}) {
   try {
     const sheet = await getPatientsSheet();
     const rows = await sheet.getRows();
@@ -88,12 +88,11 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
     const now = new Date().toISOString();
 
     if (existing) {
-      // Overwrite a field only when we have NEW info for it (keeps old otherwise).
-      // So a new address/pin from the patient automatically replaces the old one.
       if (name) existing.set("name", name);
       if (address) existing.set("address", address);
       if (pin_location) existing.set("pin_location", pin_location);
       if (last_service) existing.set("last_service", last_service);
+      if (image_link) existing.set("image_link", image_link);
       existing.set("last_seen", now);
       await existing.save();
     } else {
@@ -103,6 +102,7 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
         address: address || "",
         pin_location: pin_location || "",
         last_service: last_service || "",
+        image_link: image_link || "",
         last_seen: now,
       });
     }
@@ -112,6 +112,26 @@ export async function savePatientMemory(whatsappNumber, { name, address, pin_loc
 }
 
 // Get ALL patients (for campaigns to opted-in patients only).
+// Get the most recent photo link saved for this patient (and clear it
+// so it isn't attached to a future unrelated lead).
+export async function getAndClearPatientImage(whatsappNumber) {
+  try {
+    const sheet = await getPatientsSheet();
+    const rows = await sheet.getRows();
+    const row = rows.find((r) => normalizeNumber(r.get("whatsapp_number")) === normalizeNumber(whatsappNumber));
+    if (!row) return "";
+    const link = row.get("image_link") || "";
+    if (link) {
+      row.set("image_link", "");
+      await row.save();
+    }
+    return link;
+  } catch (e) {
+    console.error("getAndClearPatientImage error:", e.message);
+    return "";
+  }
+}
+
 export async function getAllPatients() {
   try {
     const sheet = await getPatientsSheet();
@@ -128,5 +148,18 @@ export async function getAllPatients() {
   } catch (e) {
     console.error("getAllPatients error:", e.message);
     return [];
+  }
+}
+
+// Get the latest hosted image link for a patient (for manager leads).
+export async function getPatientImageLink(whatsappNumber) {
+  try {
+    const sheet = await getPatientsSheet();
+    const rows = await sheet.getRows();
+    const row = rows.find((r) => normalizeNumber(r.get("whatsapp_number")) === normalizeNumber(whatsappNumber));
+    return row ? (row.get("image_link") || "") : "";
+  } catch (e) {
+    console.error("getPatientImageLink error:", e.message);
+    return "";
   }
 }
