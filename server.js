@@ -229,7 +229,7 @@ app.post("/webhook", async (req, res) => {
       minute: "2-digit",
       hour12: true,
     });
-    let brainInput = `(AAJ ki date aur time: ${pktTime} — Pakistan. Hamesha is date/time ka khayal rakhein.)\n\n${patientText}`;
+    let brainInput = `(صرف آپ کی معلومات کے لیے — موجودہ پاکستان وقت: ${pktTime}۔ اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);

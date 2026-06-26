@@ -24,6 +24,16 @@ function buildSystemPrompt(knowledge) {
 گرم جوش، پروفیشنل، ذہین، انسان جیسی، مہذب، صابر، لچکدار۔
 کبھی روبوٹ جیسی، رٹی رٹائی، باربار دہرانے والی یا تفتیشی نہ لگیں۔
 
+== اختصار (بہت اہم — مختصر جواب دیں) ==
+- ہمیشہ **بہترین، رواں، مقامی اردو** میں جواب دیں — گرامر کی کوئی غلطی نہ ہو۔ ترجمہ شدہ یا اوپری اردو نہ ہو۔
+- جب اردو میں انگلش الفاظ (مثلاً appointment, report, test) استعمال کریں، تو جملہ ہمیشہ دائیں سے بائیں (RTL) درست ترتیب میں رہے — انگلش لفظ جملے کی روانی نہ بگاڑے۔
+- ہمیشہ **مختصر، دو سے تین جملوں** میں جواب دیں۔ لمبی تقریریں، غیر ضروری تفصیل، یا بار بار وضاحت نہ کریں۔
+- صرف وہی بتائیں جو مریض نے پوچھا — اضافی معلومات کا انبار نہ لگائیں۔
+- ایک وقت میں ایک سوال یا ایک نکتہ۔ جواب جتنا مختصر اور کارآمد ہو، اتنا بہتر۔
+- لمبے سلام/دعا یا غیر متعلقہ باتوں کا مختصر، مہذب جواب دے کر فوراً ہسپتال کی سروس/اپائنٹمنٹ کی طرف لے آئیں۔
+- غیر متعلقہ سوال (جو ہسپتال سے متعلق نہ ہو) کو نرمی سے، مختصراً ٹالیں: "معذرت، یہ ہماری سروس سے متعلق نہیں — کیا میں آپ کی کسی طبی یا اپائنٹمنٹ میں مدد کروں؟ 🌸"
+- مقصد: کم لفظوں میں مدد کریں، اور نرمی سے مریض کو اپائنٹمنٹ/وزٹ کی طرف راغب کریں۔
+
 == زبان و انداز ==
 - بالکل عام، فطری، روزمرہ والی پاکستانی اردو — جیسے ایک نوجوان پاکستانی لڑکی واٹس ایپ پر بات کرتی ہے۔
 - بھاری کتابی الفاظ نہ استعمال کریں (براہِ کرم، موصول، مستفید، ازراہِ کرم وغیرہ سے گریز)۔ سادہ الفاظ: "جی"، "اوکے"، "ٹھیک ہے"، "بتا دیں"، "بھیج دیں"، "کر دیتی ہوں"۔
@@ -158,8 +168,10 @@ function buildSystemPrompt(knowledge) {
 == ہسپتال کی معلومات ==
 ${knowledge}
 
-== خفیہ آؤٹ پٹ (مریض کو نظر نہیں آتا — نظام ہٹا دیتا ہے) ==
-ہر جواب کے آخر میں نئی لائن پر:
+== خفیہ آؤٹ پٹ (مریض کو ہرگز نظر نہیں آنا چاہیے) ==
+**انتہائی اہم:** یہ JSON صرف نظام کے لیے ہے، مریض کو کبھی نظر نہیں آنا چاہیے۔ ہمیشہ بالکل اِسی فارمیٹ میں، حرف بہ حرف یہی ٹیگ استعمال کریں — META ٹیگ دو زاویہ بریکٹس کے ساتھ شروع اور ختم کریں، جیسا نیچے دکھایا گیا ہے۔ کوئی اور بریکٹ ہرگز استعمال نہ کریں۔ یہ ہمیشہ جواب کے آخر میں، بالکل آخری چیز ہو۔
+- آپ کو موجودہ تاریخ/وقت دیا جاتا ہے صرف آپ کی معلومات کے لیے — اسے جواب میں **خود سے نہ لکھیں** جب تک مریض وقت/دن کے بارے میں نہ پوچھے۔
+ہر جواب کے آخر میں نئی لائن پر بالکل یہی:
 <<META>>{"intent":"...","department":"...","needs_human":true/false,"stay_silent":true/false,"patient_name":"...","contact_number":"...","address":"...","pin_location":"...","lead_complete":true/false,"lead_summary":"..."}<</META>>
 - stay_silent: true صرف اُس وقت جب پیغام واضح طور پر سیلز/مارکیٹنگ پچ ہو اور جواب نہیں دینا — ورنہ false۔
 - department: "appointment"/"pharmacy"/"lab"/"aesthetic"/""۔
@@ -187,6 +199,7 @@ export async function askBrain(patientMessage, knowledge, history = []) {
         model: MODEL,
         messages,
         temperature: 0.4,
+        max_tokens: 350,
       });
       break; // success
     } catch (e) {
@@ -216,11 +229,37 @@ export async function askBrain(patientMessage, knowledge, history = []) {
     lead_complete: false, lead_summary: "",
   };
 
-  const match = raw.match(/<<META>>([\s\S]*?)<<\/META>>/);
-  if (match) {
-    reply = raw.replace(match[0], "").trim();
-    try { meta = { ...meta, ...JSON.parse(match[1].trim()) }; } catch (e) {}
+  // Extract the hidden META JSON. The model sometimes varies the tag
+  // (<<META>>, <META>, <>, or just a trailing {...}). Catch all cases so
+  // the JSON NEVER leaks to the patient.
+  let metaJson = null;
+
+  // 1) Proper <<META>>...<</META>> wrapper (any bracket variant)
+  const m1 = raw.match(/<+\s*META\s*>+([\s\S]*?)<+\s*\/?\s*META\s*>+/i);
+  if (m1) {
+    reply = raw.replace(m1[0], "").trim();
+    metaJson = m1[1].trim();
+  } else {
+    // 2) Any <...>{ ... }<...> style around a JSON object
+    const m2 = raw.match(/<[^>]*>\s*(\{[\s\S]*?\})\s*<[^>]*>/);
+    if (m2) {
+      reply = raw.replace(m2[0], "").trim();
+      metaJson = m2[1].trim();
+    } else {
+      // 3) A trailing JSON object containing our known fields
+      const m3 = raw.match(/\{[\s\S]*?"(?:intent|department|lead_complete)"[\s\S]*?\}\s*$/);
+      if (m3) {
+        reply = raw.replace(m3[0], "").trim();
+        metaJson = m3[0].trim();
+      }
+    }
   }
+
+  if (metaJson) {
+    try { meta = { ...meta, ...JSON.parse(metaJson) }; } catch (e) {}
+  }
+  // Safety net: strip any leftover stray META tags so nothing leaks.
+  reply = reply.replace(/<+\s*\/?\s*META\s*>+/gi, "").trim();
 
   return { reply, meta };
 }
