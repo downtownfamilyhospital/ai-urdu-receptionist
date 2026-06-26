@@ -75,6 +75,17 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
       return;
     }
 
+    // WhatsApp template parameters can't contain newlines, tabs, or 4+
+    // spaces. Flatten the summary into a single clean line for the template.
+    const cleanParam = (s) =>
+      (s || "")
+        .replace(/[\r\n\t]+/g, " | ")  // newlines/tabs → separator
+        .replace(/\s{2,}/g, " ")        // collapse multiple spaces
+        .trim();
+    const deptParam = cleanParam(dept);
+    const summaryParam = cleanParam(summary).slice(0, 1000);
+    const numberParam = cleanParam(patientNumber);
+
     for (const to of numbers) {
       try {
         await axios.post(
@@ -90,9 +101,9 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
                 {
                   type: "body",
                   parameters: [
-                    { type: "text", text: dept },
-                    { type: "text", text: summary.slice(0, 1000) },
-                    { type: "text", text: patientNumber },
+                    { type: "text", text: deptParam },
+                    { type: "text", text: summaryParam },
+                    { type: "text", text: numberParam },
                   ],
                 },
               ],
