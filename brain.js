@@ -176,11 +176,34 @@ export async function askBrain(patientMessage, knowledge, history = []) {
     { role: "user", content: patientMessage },
   ];
 
-  const completion = await openai.chat.completions.create({
-    model: "gpt-4o",
-    messages,
-    temperature: 0.4,
-  });
+  // Use gpt-4o-mini: much higher rate limits, lower cost, great for this.
+  // Retry up to 3 times on a rate-limit (429) so no patient is dropped.
+  const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  let completion;
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages,
+        temperature: 0.4,
+      });
+      break; // success
+    } catch (e) {
+      lastErr = e;
+      if (e?.status === 429 && attempt < 3) {
+        // wait a bit and retry (the header suggests how long; default ~3s)
+        const waitMs = (e?.headers?.["retry-after-ms"]
+          ? parseInt(e.headers["retry-after-ms"])
+          : 3000) + 500;
+        console.log(`⏳ Rate limit, retry ${attempt}/3 after ${waitMs}ms`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      } else {
+        throw e; // other error, or out of retries
+      }
+    }
+  }
+  if (!completion) throw lastErr;
 
   const raw = completion.choices[0].message.content || "";
 
