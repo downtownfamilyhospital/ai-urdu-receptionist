@@ -176,9 +176,9 @@ export async function askBrain(patientMessage, knowledge, history = []) {
     { role: "user", content: patientMessage },
   ];
 
-  // Use gpt-4o-mini: much higher rate limits, lower cost, great for this.
-  // Retry up to 3 times on a rate-limit (429) so no patient is dropped.
-  const MODEL = process.env.OPENAI_MODEL || "gpt-4o-mini";
+  // Use gpt-4o for natural Urdu quality. Retry up to 3 times on a
+  // rate-limit (429) so no patient is dropped during a spike.
+  const MODEL = process.env.OPENAI_MODEL || "gpt-4o";
   let completion;
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
