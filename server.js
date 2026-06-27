@@ -16,6 +16,7 @@ import { getPatientMemory, savePatientMemory, getAndClearPatientImage } from "./
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
 import { loadConversation, saveConversation, clearConversation, cleanupExpired } from "./conversations.js";
+import { scheduleReminder, processReminders } from "./reminders.js";
 import { runCampaign, getApprovedTemplates } from "./campaign.js";
 import { getAllPatients } from "./patients.js";
 import {
@@ -197,26 +198,22 @@ app.post("/webhook", async (req, res) => {
       return; // don't run the normal AI flow for a correction command
     }
 
-    // 1. Load hospital knowledge from Google Sheets
-    const knowledge = await loadKnowledge();
-
-    // 1a. Load admin corrections and append — Zainab always obeys these
-    const corrections = await loadCorrections();
+    // 1+2. Load knowledge, corrections, and conversation IN PARALLEL
+    //      (independent reads → much faster than one-by-one).
+    const [knowledge, corrections, loadedHistory] = await Promise.all([
+      loadKnowledge(),
+      loadCorrections(),
+      loadConversation(fromFormatted),
+    ]);
     const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
 
-    // 2. Get recent conversation so the AI remembers context.
-    //    Durable (survives restarts) + in-memory fallback.
-    let history = await loadConversation(fromFormatted);
+    let history = loadedHistory;
     if (!history || history.length === 0) history = getRecentHistory(from);
 
-    // 1b. Returning-patient memory — but ONLY greet "welcome back" on a
-    //     FRESH conversation (no active history). Mid-conversation we just
-    //     use their known details silently, so she doesn't repeat the
-    //     greeting again and again.
+    // 1b. ALWAYS load saved patient details so Zainab never re-asks.
+    //     Greeting only on a fresh conversation (no active history).
     const isFreshConversation = !history || history.length === 0;
-    const patientMemory = isFreshConversation
-      ? await getPatientMemory(fromFormatted)
-      : "";
+    const patientMemory = await getPatientMemory(fromFormatted, isFreshConversation);
 
     // 3. Ask the AI brain (include patient memory + ad context + current time)
     const pktTime = new Date().toLocaleString("en-US", {
@@ -234,11 +231,20 @@ app.post("/webhook", async (req, res) => {
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
 
-    // 4. Save everything
+    // If this is a sales/marketing pitch, stay silent (no reply, no saves).
+    if (meta.stay_silent) {
+      console.log(`🤐 ${from}: sales/marketing pitch — staying silent`);
+      return;
+    }
+
+    // 4. SEND THE REPLY FIRST so the patient gets a fast response,
+    //    THEN do the saves (patient isn't kept waiting on Sheet writes).
+    await sendText(from, reply);
+    console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
+
+    // 5. Save everything (after the reply is already on its way).
     saveMessage(from, "user", patientText);
     saveMessage(from, "assistant", reply);
-    // Durable save (survives restarts) so an interrupted booking resumes
-    await saveConversation(fromFormatted, history, patientText, reply);
     saveLead({
       patient_name: meta.patient_name || profileName,
       whatsapp_number: fromFormatted,
@@ -247,25 +253,16 @@ app.post("/webhook", async (req, res) => {
       intent: meta.intent,
       needs_human: meta.needs_human,
     });
-
-    // 5. Send the Urdu reply back — UNLESS this is a sales/marketing
-    //    pitch the brain flagged to ignore (stay silent, save cost).
-    if (meta.stay_silent) {
-      console.log(`🤐 ${from}: sales/marketing pitch — staying silent`);
-      return;
-    }
-    await sendText(from, reply);
-    console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
-
-    // 5b. ALWAYS remember this patient in the Google Sheet (name +
-    //     WhatsApp + address) for future correspondence & campaigns.
-    //     Number stored in clean international format (+923...).
-    await savePatientMemory(fromFormatted, {
-      name: meta.patient_name || profileName || "",
-      address: meta.address || "",
-      pin_location: meta.pin_location || "",
-      last_service: meta.department || "",
-    });
+    // Durable saves in parallel (conversation + patient memory).
+    await Promise.all([
+      saveConversation(fromFormatted, history, patientText, reply),
+      savePatientMemory(fromFormatted, {
+        name: meta.patient_name || profileName || "",
+        address: meta.address || "",
+        pin_location: meta.pin_location || "",
+        last_service: meta.department || "",
+      }),
+    ]);
 
     // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
     //    (For now we LOG it so we can test collection. Manager delivery
@@ -286,6 +283,10 @@ app.post("/webhook", async (req, res) => {
       if (!leadImage) leadImage = await getAndClearPatientImage(fromFormatted);
       if (leadImage) fullSummary += `\nPatient photo: ${leadImage}`;
       await forwardLeadToManager(dept, fullSummary, fromFormatted);
+      // Schedule a 3-hour-before reminder if a visit time was captured.
+      if (meta.visit_at) {
+        await scheduleReminder(fromFormatted, meta.patient_name || profileName, meta.lead_summary, meta.visit_at);
+      }
       // Lead is done — clear this patient's conversation memory so the
       // Sheet stays lean and the next chat starts fresh.
       await clearConversation(fromFormatted);
@@ -699,3 +700,8 @@ app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 setInterval(() => {
   cleanupExpired().catch((e) => console.error("cleanup error:", e.message));
 }, 60 * 60 * 1000);
+
+// Every 15 minutes, check for appointments ~3h away and send reminders.
+setInterval(() => {
+  processReminders().catch((e) => console.error("reminder error:", e.message));
+}, 15 * 60 * 1000);

@@ -46,7 +46,7 @@ async function getPatientsSheet() {
 
 // Look up a patient by number. Returns their remembered profile
 // as a short text note for Zainab, or "" if new / expired.
-export async function getPatientMemory(whatsappNumber) {
+export async function getPatientMemory(whatsappNumber, isFresh = true) {
   try {
     const sheet = await getPatientsSheet();
     const rows = await sheet.getRows();
@@ -60,18 +60,23 @@ export async function getPatientMemory(whatsappNumber) {
     const pinLocation = row.get("pin_location") || "";
     const lastService = row.get("last_service") || "";
 
-    let note = "(RETURNING PATIENT — hum is mareez ko pehle se jante hain. ";
-    if (name) note += `Name: ${name}. `;
-    if (address) note += `Address: ${address}. `;
-    if (pinLocation) note += `Pin location: saved. `;
-    if (lastService) note += `Last service: ${lastService}. `;
+    let note = "(ہم اس مریض کو پہلے سے جانتے ہیں — یہ معلومات یاد رکھیں، دوبارہ نہ پوچھیں: ";
+    if (name) note += `نام: ${name}۔ `;
+    if (address) note += `پتہ: ${address}۔ `;
+    if (pinLocation) note += `پن لوکیشن: محفوظ ہے۔ `;
+    if (lastService) note += `پچھلی سروس: ${lastService}۔ `;
+    note += `واٹس ایپ نمبر: ${whatsappNumber}۔ `;
+    if (isFresh) {
+      note +=
+        "چونکہ یہ نئی گفتگو کا آغاز ہے، نام لے کر گرم جوشی سے سلام کریں " +
+        "(مثلاً 'السلام علیکم [نام] جی! 🌸 آپ کیسے ہیں؟ بتائیں آج کیا خدمت کروں؟')۔ ";
+    } else {
+      note += "گفتگو جاری ہے — دوبارہ سلام/welcome back نہ کہیں۔ ";
+    }
     note +=
-      "IMPORTANT: Pehle se mojood naam le kar garam joshi se salam karein aur surprise dein ke hum unhe yaad rakhte hain " +
-      "(e.g. 'السلام علیکم [Name] جی! 🌸 آپ کیسے ہیں؟ ہم دوبارہ آپ کی کیا خدمت کریں؟'). " +
-      "Naam, number, address dobara MAT poochein. Agar woh naya order dein, to seedha order note karein aur " +
-      "unke pehle se mojood record (naam, number, address) ke sath summary bana kar bhej dein — " +
-      "is repeat customer se 'kya ye sahi hai?' bhi poochne ki zaroorat nahi, bas confirm kar ke aage barhein. " +
-      "Sirf agar woh khud naya address/number batayein to use update kar lein.)";
+      "نام، نمبر، پتہ دوبارہ کبھی نہ پوچھیں — یہ پہلے سے معلوم ہیں۔ " +
+      "لیڈ مکمل کرنے سے پہلے خلاصے میں یہ نام، واٹس ایپ نمبر اور پتہ دکھا کر مریض سے تصدیق ضرور لیں۔ " +
+      "اگر مریض خود نیا پتہ/نمبر بتائے تو اپڈیٹ کر لیں۔)";
     return note;
   } catch (e) {
     console.error("getPatientMemory error:", e.message);
