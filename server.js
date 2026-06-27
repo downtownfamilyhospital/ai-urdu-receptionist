@@ -11,8 +11,7 @@ import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
 import { sendText } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
-import { imageToPublicLink } from "./images.js";
-import { getPatientMemory, savePatientMemory, getAndClearPatientImage } from "./patients.js";
+import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
 import { loadConversation, saveConversation, clearConversation, cleanupExpired } from "./conversations.js";
@@ -85,36 +84,26 @@ app.post("/webhook", async (req, res) => {
     // - anything else  → politely ask for text or voice
     let patientText = "";
     let wasVoice = false;
-    let imageLink = ""; // public link if patient sent a photo
 
     if (message.type === "text") {
       patientText = message.text.body;
     } else if (message.type === "image") {
-      // Patient sent a photo. Host it for a public link, then let the
-      // CONVERSATION CONTEXT decide the department (don't assume medicine).
-      console.log(`🖼️ ${from}: image received, hosting...`);
-      try {
-        imageLink = await imageToPublicLink(message.image.id);
-      } catch (e) {
-        console.error("Image host error:", e.message);
-      }
-      const caption = message.image?.caption || "";
-      // Don't claim it's forwarded. Acknowledge receipt, find the right
-      // department + confirm, THEN forward with the completed lead.
-      patientText = caption
-        ? `(مریض نے ایک تصویر بھیجی ہے، ساتھ یہ لکھا:) ${caption}\n(یاد رہے: تصویر کے مواد پر تبصرہ نہ کریں۔ یہ نہ کہیں کہ بھیج دی ہے۔ پہلے درست شعبہ معلوم کریں، باقی معلومات لیں، تصدیق لیں — پھر تصویر confirmed لیڈ کے ساتھ جائے گی)`
-        : "(مریض نے ایک تصویر بھیجی ہے۔ تصویر کے مواد پر تبصرہ نہ کریں، اور یہ نہ کہیں کہ منیجر کو بھیج دی ہے۔ پہلے نرمی سے پوچھیں کہ یہ کس بارے میں ہے [دوا یا جلد/بال] اور کیا جاننا چاہتے ہیں، باقی لیڈ معلومات لیں، خلاصہ دکھا کر تصدیق لیں — تصویر تب confirmed لیڈ کے ساتھ خود بخود جائے گی)";
-      if (imageLink) {
-        // Save the link only (no department assumption).
-        await savePatientMemory(fromFormatted, { image_link: imageLink });
-        console.log(`🖼️ → hosted: ${imageLink}`);
-      }
+      // We do NOT process photos on this number. Politely tell the patient
+      // to describe what they need in text or voice. No hosting/forwarding.
+      console.log(`🖼️ ${from}: image received — telling patient we can't view photos`);
+      await sendText(
+        from,
+        "معذرت، اس واٹس ایپ نمبر پر میں تصویر نہیں دیکھ سکتی۔ 🌸 اگر آپ تھوڑی تفصیل text یا voice میں بتا دیں کہ آپ اس تصویر کے بارے میں کیا جاننا چاہتے ہیں، تو میں خوشی سے آپ کی مدد کر دوں گی۔"
+      );
+      return; // stop here — don't run the AI flow for a photo
     } else if (message.type === "audio") {
       wasVoice = true;
       console.log(`🎤 ${from}: voice note received, transcribing...`);
       try {
-        patientText = await transcribeVoice(message.audio.id);
-        console.log(`🎤 → transcribed: ${patientText}`);
+        const transcribed = await transcribeVoice(message.audio.id);
+        console.log(`🎤 → transcribed: ${transcribed}`);
+        // Tag it as voice so Zainab confirms she heard names/numbers right.
+        patientText = `(مریض نے وائس میسج بھیجا، جو ٹیکسٹ میں یہ بنا:) ${transcribed}\n(اگر اس میں نام، نمبر، یا پتہ ہو تو نرمی سے تصدیق کریں کہ آپ نے ٹھیک سنا — مریض غلط ہونے پر لکھ کر درست کر سکتا ہے)`;
       } catch (e) {
         console.error("Transcription error:", e.response?.data || e.message);
         await sendText(
@@ -192,8 +181,9 @@ app.post("/webhook", async (req, res) => {
           await sendText(from, "اصلاح خالی ہے۔ مثال: zainab zainab [secret] PRP ki fee 15000 hai");
         }
       } else {
-        // wrong/missing secret — treat as normal message (don't reveal the secret exists)
-        await sendText(from, "معذرت، یہ کمانڈ درست نہیں۔");
+        // wrong/missing secret. Don't reveal the secret exists to outsiders,
+        // but the owner needs a hint. Give a neutral message.
+        await sendText(from, "معذرت، یہ کمانڈ مکمل یا درست نہیں۔ (correction کے لیے درست secret لازمی ہے۔)");
       }
       return; // don't run the normal AI flow for a correction command
     }
@@ -239,14 +229,22 @@ app.post("/webhook", async (req, res) => {
 
     // 4. SEND THE REPLY FIRST so the patient gets a fast response,
     //    THEN do the saves (patient isn't kept waiting on Sheet writes).
-    await sendText(from, reply);
-    console.log(`🤖 → ${from}: ${reply.slice(0, 60)}...`);
+    // HARD SAFETY: never let the "my Urdu is weak" apology slip through,
+    // no matter what the model or any old correction says.
+    let safeReply = reply
+      .replace(/میری اردو[^۔\n]*(کم|کمزور|اچھی)[^۔\n]*۔?/g, "")
+      .replace(/اردو[^۔\n]*معذرت[^۔\n]*۔?/g, "")
+      .replace(/اردو[^۔\n]*معزرت[^۔\n]*۔?/g, "")
+      .trim();
+    if (!safeReply) safeReply = "جی، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟ 🌸";
+    await sendText(from, safeReply);
+    console.log(`🤖 → ${from}: ${safeReply.slice(0, 60)}...`);
 
     // 5. Save everything (after the reply is already on its way).
     saveMessage(from, "user", patientText);
-    saveMessage(from, "assistant", reply);
+    saveMessage(from, "assistant", safeReply);
     saveLead({
-      patient_name: meta.patient_name || profileName,
+      patient_name: meta.patient_name,
       whatsapp_number: fromFormatted,
       inquiry: patientText,
       department: meta.department,
@@ -255,9 +253,9 @@ app.post("/webhook", async (req, res) => {
     });
     // Durable saves in parallel (conversation + patient memory).
     await Promise.all([
-      saveConversation(fromFormatted, history, patientText, reply),
+      saveConversation(fromFormatted, history, patientText, safeReply),
       savePatientMemory(fromFormatted, {
-        name: meta.patient_name || profileName || "",
+        name: meta.patient_name || "",
         address: meta.address || "",
         pin_location: meta.pin_location || "",
         last_service: meta.department || "",
@@ -271,21 +269,16 @@ app.post("/webhook", async (req, res) => {
       const dept = meta.department || "general";
       console.log("==================================================");
       console.log(`✅ LEAD COMPLETE → department: ${dept}`);
-      console.log(`👤 Patient: ${meta.patient_name || profileName} (${from})`);
+      console.log(`👤 Patient: ${meta.patient_name} (${from})`);
       console.log(`📋 Summary for manager:\n${meta.lead_summary}`);
       console.log("==================================================");
 
       // Forward the lead to the relevant department manager's WhatsApp.
-      let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name || profileName}`;
-      // Attach a photo link: either from this message, or one the
-      // patient sent earlier in the conversation (saved on their record).
-      let leadImage = imageLink;
-      if (!leadImage) leadImage = await getAndClearPatientImage(fromFormatted);
-      if (leadImage) fullSummary += `\nPatient photo: ${leadImage}`;
+      let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}`;
       await forwardLeadToManager(dept, fullSummary, fromFormatted);
       // Schedule a 3-hour-before reminder if a visit time was captured.
       if (meta.visit_at) {
-        await scheduleReminder(fromFormatted, meta.patient_name || profileName, meta.lead_summary, meta.visit_at);
+        await scheduleReminder(fromFormatted, meta.patient_name, meta.lead_summary, meta.visit_at);
       }
       // Lead is done — clear this patient's conversation memory so the
       // Sheet stays lean and the next chat starts fresh.
