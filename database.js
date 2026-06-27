@@ -14,11 +14,21 @@ function nowISO() {
   return new Date().toISOString();
 }
 
+// CRITICAL: normalize every WhatsApp number to ONE canonical format
+// (923xxxxxxxxx — digits only, 0→92) so the same patient is never split
+// across formats and DIFFERENT patients are never mixed. Used on every
+// store and every lookup.
+function normNum(num) {
+  let n = (num || "").replace(/[^0-9]/g, "");
+  if (n.startsWith("0")) n = "92" + n.slice(1);
+  return n;
+}
+
 export async function saveLead({ patient_name, whatsapp_number, inquiry, department, intent, needs_human }) {
   db.data.leads.push({
     id: db.data.leads.length + 1,
     patient_name: patient_name || "",
-    whatsapp_number,
+    whatsapp_number: normNum(whatsapp_number),
     inquiry,
     department: department || "",
     intent: intent || "general",
@@ -31,7 +41,7 @@ export async function saveLead({ patient_name, whatsapp_number, inquiry, departm
 
 export async function saveMessage(whatsapp_number, role, content) {
   db.data.messages.push({
-    whatsapp_number,
+    whatsapp_number: normNum(whatsapp_number),
     role,
     content,
     created_at: nowISO(),
@@ -41,7 +51,8 @@ export async function saveMessage(whatsapp_number, role, content) {
 
 // Get the last few messages so the AI remembers the conversation.
 export function getRecentHistory(whatsapp_number, limit = 6) {
-  const all = db.data.messages.filter((m) => m.whatsapp_number === whatsapp_number);
+  const key = normNum(whatsapp_number);
+  const all = db.data.messages.filter((m) => normNum(m.whatsapp_number) === key);
   return all.slice(-limit).map((m) => ({ role: m.role, content: m.content }));
 }
 
@@ -50,26 +61,29 @@ export function getRecentHistory(whatsapp_number, limit = 6) {
 export function getConversations() {
   const byNumber = {};
   for (const m of db.data.messages) {
-    if (!byNumber[m.whatsapp_number]) {
-      byNumber[m.whatsapp_number] = { whatsapp_number: m.whatsapp_number, last: m.content, time: m.created_at, count: 0 };
+    const key = normNum(m.whatsapp_number);
+    if (!byNumber[key]) {
+      byNumber[key] = { whatsapp_number: key, last: m.content, time: m.created_at, count: 0 };
     }
-    byNumber[m.whatsapp_number].last = m.content;
-    byNumber[m.whatsapp_number].time = m.created_at;
-    byNumber[m.whatsapp_number].count++;
+    byNumber[key].last = m.content;
+    byNumber[key].time = m.created_at;
+    byNumber[key].count++;
   }
   return Object.values(byNumber).sort((a, b) => (a.time < b.time ? 1 : -1));
 }
 
 // Get the full conversation for one patient number.
 export function getConversation(whatsapp_number) {
+  const key = normNum(whatsapp_number);
   return db.data.messages
-    .filter((m) => m.whatsapp_number === whatsapp_number)
+    .filter((m) => normNum(m.whatsapp_number) === key)
     .map((m) => ({ role: m.role, content: m.content, created_at: m.created_at }));
 }
 
 // Get stats for one patient number (most recent lead info).
 export function getPatientLead(whatsapp_number) {
-  const leads = db.data.leads.filter((l) => l.whatsapp_number === whatsapp_number);
+  const key = normNum(whatsapp_number);
+  const leads = db.data.leads.filter((l) => normNum(l.whatsapp_number) === key);
   return leads.length ? leads[leads.length - 1] : null;
 }
 
