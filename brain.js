@@ -227,13 +227,4 @@ export async function askBrain(patientMessage, knowledge, history = []) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      completion = await openai.chat.completions.create({
-        model: MODEL,
-        messages,
-        temperature: 0.4,
-        max_tokens: 350,
-      });
-      break; // success
-    } catch (e) {
-      lastErr = e;
-      if (e?.status === 
+      completio
