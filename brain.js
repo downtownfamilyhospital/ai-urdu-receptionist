@@ -227,4 +227,88 @@ export async function askBrain(patientMessage, knowledge, history = []) {
   let lastErr;
   for (let attempt = 1; attempt <= 3; attempt++) {
     try {
-      completio
+      completion = await openai.chat.completions.create({
+        model: MODEL,
+        messages,
+        temperature: 0.4,
+        max_tokens: 350,
+      });
+      break; // success
+    } catch (e) {
+      lastErr = e;
+      if (e?.status === 429 && attempt < 3) {
+        // wait a bit and retry (the header suggests how long; default ~3s)
+        const waitMs = (e?.headers?.["retry-after-ms"]
+          ? parseInt(e.headers["retry-after-ms"])
+          : 3000) + 500;
+        console.log(`⏳ Rate limit, retry ${attempt}/3 after ${waitMs}ms`);
+        await new Promise((r) => setTimeout(r, waitMs));
+      } else {
+        throw e; // other error, or out of retries
+      }
+    }
+  }
+  if (!completion) throw lastErr;
+
+  const raw = completion.choices[0].message.content || "";
+
+  let reply = raw;
+  let meta = {
+    intent: "general", department: "", needs_human: false,
+    patient_name: "", contact_number: "", address: "",
+    pin_location: "",
+    visit_at: "",
+    stay_silent: false,
+    lead_complete: false, lead_summary: "",
+  };
+
+  // Extract the hidden META JSON. The model sometimes varies the tag
+  // (<<META>>, <META>, <>, or just a trailing {...}). Catch all cases so
+  // the JSON NEVER leaks to the patient.
+  let metaJson = null;
+
+  // 1) Proper <<META>>...<</META>> wrapper (any bracket variant)
+  const m1 = raw.match(/<+\s*META\s*>+([\s\S]*?)<+\s*\/?\s*META\s*>+/i);
+  if (m1) {
+    reply = raw.replace(m1[0], "").trim();
+    metaJson = m1[1].trim();
+  } else {
+    // 2) Any <...>{ ... }<...> style around a JSON object
+    const m2 = raw.match(/<[^>]*>\s*(\{[\s\S]*?\})\s*<[^>]*>/);
+    if (m2) {
+      reply = raw.replace(m2[0], "").trim();
+      metaJson = m2[1].trim();
+    } else {
+      // 3) A trailing JSON object containing our known fields
+      const m3 = raw.match(/\{[\s\S]*?"(?:intent|department|lead_complete)"[\s\S]*?\}\s*$/);
+      if (m3) {
+        reply = raw.replace(m3[0], "").trim();
+        metaJson = m3[0].trim();
+      }
+    }
+  }
+
+  if (metaJson) {
+    try { meta = { ...meta, ...JSON.parse(metaJson) }; } catch (e) {}
+  }
+  // Safety: never let "Unknown" or placeholder names reach the manager lead.
+  const UNKNOWN_NAMES = ["unknown", "نامعلوم", "نہیں دیا", "no name", "n/a", "نا معلوم", "not given"];
+  if (meta.patient_name && UNKNOWN_NAMES.includes(meta.patient_name.trim().toLowerCase())) {
+    meta.patient_name = "";
+  }
+  // Safety net: strip any leftover stray META tags so nothing leaks.
+  reply = reply.replace(/<+\s*\/?\s*META\s*>+/gi, "").trim();
+
+  // HARD BLOCK: never let any "my Urdu is weak / sorry for Urdu" sentence
+  // reach the patient, no matter how the model phrases it. Remove the whole
+  // sentence containing these tell-tale phrases.
+  const urduApologyPatterns = [
+    /[^۔.!\n]*میری\s*اردو[^۔.!\n]*[۔.!]?/gi,
+    /[^۔.!\n]*اردو\s*(تھوڑی|کم|کمزور|اچھی نہیں)[^۔.!\n]*[۔.!]?/gi,
+    /[^۔.!\n]*(spelling|سپیلنگ)\s*کی\s*غلطی[^۔.!\n]*[۔.!]?/gi,
+  ];
+  for (const p of urduApologyPatterns) reply = reply.replace(p, "").trim();
+  reply = reply.replace(/\s{2,}/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+
+  return { reply, meta };
+}
