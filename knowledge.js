@@ -32,28 +32,42 @@ export async function loadKnowledge() {
     return cache; // use remembered copy
   }
 
-  const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, getAuth());
-  await doc.loadInfo();
+  // Try to refresh from Google, with retries. If Google has a transient
+  // hiccup (e.g. token "Premature close"), fall back to the last good
+  // cache so patients still get answered instead of an error.
+  let lastErr;
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    try {
+      const doc = new GoogleSpreadsheet(process.env.GOOGLE_SHEET_ID, getAuth());
+      await doc.loadInfo();
 
-  let text = "";
-  for (const sheet of doc.sheetsByIndex) {
-    if (SKIP_TABS.includes(sheet.title)) continue; // skip data/operational tabs
-    text += `\n### ${sheet.title}\n`;
-    const rows = await sheet.getRows();
-    if (rows.length === 0) {
-      text += "(no data yet)\n";
-      continue;
-    }
-    const headers = sheet.headerValues;
-    for (const row of rows) {
-      const parts = headers.map((h) => `${h}: ${row.get(h) ?? ""}`);
-      text += "- " + parts.join(" | ") + "\n";
+      let text = "";
+      for (const sheet of doc.sheetsByIndex) {
+        if (SKIP_TABS.includes(sheet.title)) continue;
+        text += `\n### ${sheet.title}\n`;
+        const rows = await sheet.getRows();
+        if (rows.length === 0) { text += "(no data yet)\n"; continue; }
+        const headers = sheet.headerValues;
+        for (const row of rows) {
+          const parts = headers.map((h) => `${h}: ${row.get(h) ?? ""}`);
+          text += "- " + parts.join(" | ") + "\n";
+        }
+      }
+      cache = text;
+      cacheTime = now;
+      return text;
+    } catch (e) {
+      lastErr = e;
+      console.error(`loadKnowledge attempt ${attempt}/3 failed:`, e.message);
+      if (attempt < 3) await new Promise((r) => setTimeout(r, 800 * attempt));
     }
   }
-
-  cache = text;
-  cacheTime = now;
-  return text;
+  // All retries failed. If we have an old cache, use it (better than nothing).
+  if (cache) {
+    console.error("loadKnowledge: using stale cache after failures");
+    return cache;
+  }
+  throw lastErr;
 }
 
 // Let the app refresh knowledge immediately after a correction is saved.

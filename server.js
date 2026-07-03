@@ -191,13 +191,18 @@ app.post("/webhook", async (req, res) => {
       return; // don't run the normal AI flow for a correction command
     }
 
-    // 1+2. Load knowledge, corrections, and conversation IN PARALLEL
-    //      (independent reads → much faster than one-by-one).
-    const [knowledge, corrections, loadedHistory] = await Promise.all([
+    // 1+2. Load knowledge, corrections, and conversation IN PARALLEL.
+    //      Use allSettled so a transient Google hiccup on one read doesn't
+    //      break the whole reply — we degrade gracefully instead.
+    const [kRes, cRes, hRes] = await Promise.allSettled([
       loadKnowledge(),
       loadCorrections(),
       loadConversation(fromFormatted),
     ]);
+    const knowledge = kRes.status === "fulfilled" ? kRes.value : "";
+    const corrections = cRes.status === "fulfilled" ? cRes.value : "";
+    const loadedHistory = hRes.status === "fulfilled" ? hRes.value : [];
+    if (kRes.status === "rejected") console.error("knowledge load failed:", kRes.reason?.message);
     const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
 
     let history = loadedHistory;
