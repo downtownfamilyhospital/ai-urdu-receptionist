@@ -72,8 +72,8 @@ export async function processReminders() {
       const visit = new Date(row.get("visit_at_iso") || 0).getTime();
       if (isNaN(visit)) continue;
       const hoursUntil = (visit - now) / (1000 * 60 * 60);
-      // send when between ~3h and ~2.75h before (so it fires once)
-      if (hoursUntil <= 3 && hoursUntil > 2.75) {
+      // send when between ~1h and ~0.75h before (so it fires once)
+      if (hoursUntil <= 1 && hoursUntil > 0.75) {
         const to = (row.get("whatsapp_number") || "").replace(/[^0-9]/g, "");
         const name = row.get("name") || "";
         const details = row.get("details") || "";

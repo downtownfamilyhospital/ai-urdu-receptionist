@@ -8,7 +8,8 @@
 import { JSONFilePreset } from "lowdb/node";
 
 // Create / open the data file with starting structure.
-const db = await JSONFilePreset("hospital.json", { leads: [], messages: [] });
+const db = await JSONFilePreset("hospital.json", { leads: [], messages: [], forwarded: [] });
+if (!db.data.forwarded) db.data.forwarded = []; // migrate older files
 
 function nowISO() {
   return new Date().toISOString();
@@ -106,4 +107,37 @@ export function getStats() {
   const recent = [...leads].reverse().slice(0, 50);
 
   return { total, pending, needHuman, byDept, recent };
+}
+
+// ===== Forwarded leads (real leads sent to managers) =====
+
+// Was a lead for this patient+department already forwarded recently?
+// Prevents paying twice for the same patient/same treatment/same dept.
+export function wasRecentlyForwarded(whatsapp_number, department, hours = 24) {
+  const key = normNum(whatsapp_number);
+  const dept = (department || "").toLowerCase();
+  const cutoff = Date.now() - hours * 60 * 60 * 1000;
+  return db.data.forwarded.some(
+    (f) =>
+      normNum(f.whatsapp_number) === key &&
+      (f.department || "").toLowerCase() === dept &&
+      new Date(f.created_at).getTime() > cutoff
+  );
+}
+
+// Record a lead that was actually forwarded to a manager.
+export async function saveForwardedLead({ whatsapp_number, patient_name, department, summary }) {
+  db.data.forwarded.push({
+    whatsapp_number: normNum(whatsapp_number),
+    patient_name: patient_name || "",
+    department: (department || "").toLowerCase(),
+    summary: (summary || "").slice(0, 300),
+    created_at: nowISO(),
+  });
+  await db.write();
+}
+
+// All forwarded leads, newest first (for the portal Leads tab).
+export function getForwardedLeads() {
+  return [...db.data.forwarded].reverse();
 }

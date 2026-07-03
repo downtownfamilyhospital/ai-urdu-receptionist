@@ -26,6 +26,9 @@ import {
   getConversations,
   getConversation,
   getPatientLead,
+  wasRecentlyForwarded,
+  saveForwardedLead,
+  getForwardedLeads,
 } from "./database.js";
 
 const app = express();
@@ -273,10 +276,22 @@ app.post("/webhook", async (req, res) => {
       console.log(`📋 Summary for manager:\n${meta.lead_summary}`);
       console.log("==================================================");
 
-      // Forward the lead to the relevant department manager's WhatsApp.
-      let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}`;
-      await forwardLeadToManager(dept, fullSummary, fromFormatted);
-      // Schedule a 3-hour-before reminder if a visit time was captured.
+      // Forward the lead to the relevant department manager's WhatsApp —
+      // but NEVER forward a duplicate (same patient + same department
+      // within 24h). Each template message costs money.
+      if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
+        console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
+      } else {
+        let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}`;
+        await forwardLeadToManager(dept, fullSummary, fromFormatted);
+        await saveForwardedLead({
+          whatsapp_number: fromFormatted,
+          patient_name: meta.patient_name,
+          department: dept,
+          summary: meta.lead_summary,
+        });
+      }
+      // Schedule a 1-hour-before reminder if a visit time was captured.
       if (meta.visit_at) {
         await scheduleReminder(fromFormatted, meta.patient_name, meta.lead_summary, meta.visit_at);
       }
@@ -382,20 +397,16 @@ app.get("/portal/api/chat/:number", (req, res) => {
   res.json({ number, messages, lead: getPatientLead(number) || null });
 });
 
-// Leads view — only completed/forwarded leads (department set).
+// Leads view — ONLY leads actually forwarded to managers (confirmed, complete).
 app.get("/portal/api/leads", (req, res) => {
   if (!isLoggedIn(req)) return res.status(401).json({ error: "auth" });
-  const s = getStats();
-  // recent leads that have a department (i.e. real routed leads)
-  const leads = (s.recent || [])
-    .filter((l) => l.department && l.department !== "")
-    .map((l) => ({
-      number: l.whatsapp_number,
-      name: l.patient_name || "",
-      department: l.department,
-      inquiry: cleanForDisplay(l.inquiry || "").slice(0, 80),
-      time: l.created_at,
-    }));
+  const leads = getForwardedLeads().map((l) => ({
+    number: l.whatsapp_number,
+    name: l.patient_name || "",
+    department: l.department,
+    inquiry: cleanForDisplay(l.summary || "").slice(0, 80),
+    time: l.created_at,
+  }));
   res.json(leads);
 });
 
@@ -506,7 +517,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .conv .row2{display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px}
 .conv .last{font-size:13px;color:#8696a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;direction:rtl;text-align:right;line-height:1.8}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;flex-shrink:0}
-.b-pharmacy{background:#00a884}.b-lab{background:#5b8def}.b-aesthetic{background:#c264fe}.b-appointment{background:#f0a020}.b-general{background:#6a7175}
+.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-general{background:#6a7175}
 .needs{background:#ff5252;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;flex-shrink:0}
 .unread{background:#00a884;color:#fff;font-size:11px;font-weight:600;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;flex-shrink:0}
 .empty{text-align:center;color:#8696a0;padding:40px 20px;font-size:14px}
