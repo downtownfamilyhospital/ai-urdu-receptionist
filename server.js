@@ -40,6 +40,25 @@ app.get("/", (req, res) => {
   res.send("AI Urdu Hospital Receptionist is running ✅");
 });
 
+// Diagnostic: test outbound network to Google + OpenAI. Visit /diag
+// in your browser to see if the container can reach the internet.
+app.get("/diag", async (req, res) => {
+  const out = {};
+  const test = async (name, url) => {
+    const t0 = Date.now();
+    try {
+      const r = await fetch(url, { method: "GET" });
+      out[name] = `OK (${r.status}) in ${Date.now() - t0}ms`;
+    } catch (e) {
+      out[name] = `FAIL: ${e.message} (${Date.now() - t0}ms)`;
+    }
+  };
+  await test("google", "https://www.googleapis.com/discovery/v1/apis");
+  await test("openai", "https://api.openai.com/v1/models");
+  await test("example", "https://example.com");
+  res.json({ time: new Date().toISOString(), results: out });
+});
+
 // ---- WhatsApp webhook VERIFICATION (360dialog/Meta handshake) ----
 app.get("/webhook", (req, res) => {
   const token = req.query["hub.verify_token"];
