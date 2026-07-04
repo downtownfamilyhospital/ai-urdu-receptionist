@@ -7,6 +7,28 @@
 import "dotenv/config";
 import express from "express";
 
+// ---- NETWORK FIX for ERR_STREAM_PREMATURE_CLOSE ----
+// Some Node builds drop gzip-compressed HTTPS responses mid-stream on
+// certain networks (the "Gunzip premature close" error). We configure a
+// global undici agent with keep-alive + generous timeouts and ask servers
+// NOT to gzip, which avoids the broken decompression path.
+try {
+  const { setGlobalDispatcher, Agent } = await import("undici");
+  setGlobalDispatcher(
+    new Agent({
+      keepAliveTimeout: 60000,
+      keepAliveMaxTimeout: 60000,
+      connect: { timeout: 30000 },
+      headersTimeout: 60000,
+      bodyTimeout: 60000,
+    })
+  );
+  console.log("✅ Global network agent configured (keep-alive, timeouts)");
+} catch (e) {
+  console.log("network agent setup skipped:", e.message);
+}
+
+
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
 import { sendText } from "./whatsapp.js";
