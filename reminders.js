@@ -1,8 +1,8 @@
 // =========================================================
-//  reminders.js  — appointment reminders 3 hours before.
+//  reminders.js  — appointment reminders 1 hour before.
 //  Stores appointments in a "Reminders" tab. A scheduler
 //  (in server.js) checks every 15 min and sends a reminder
-//  template ~3h before the visit, then marks it sent.
+//  template ~1h before the visit, then marks it sent.
 //  Requires an approved template (default: appointment_reminder).
 // =========================================================
 

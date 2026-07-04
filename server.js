@@ -255,17 +255,27 @@ app.post("/webhook", async (req, res) => {
     const patientMemory = await getPatientMemory(fromFormatted, isFreshConversation);
 
     // 3. Ask the AI brain (include patient memory + ad context + current time)
-    const pktTime = new Date().toLocaleString("en-US", {
-      timeZone: "Asia/Karachi",
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-      hour12: true,
+    const fmtDate = (d) =>
+      d.toLocaleString("en-US", {
+        timeZone: "Asia/Karachi", weekday: "long", year: "numeric",
+        month: "long", day: "numeric",
+      });
+    const nowPk = new Date();
+    const pktTime = nowPk.toLocaleString("en-US", {
+      timeZone: "Asia/Karachi", weekday: "long", year: "numeric",
+      month: "long", day: "numeric", hour: "numeric", minute: "2-digit", hour12: true,
     });
-    let brainInput = `(صرف آپ کی معلومات کے لیے — موجودہ پاکستان وقت: ${pktTime}۔ اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
+    // Pre-compute relative dates so "tomorrow"/"day after" become exact dates.
+    const tomorrow = new Date(nowPk.getTime() + 24 * 60 * 60 * 1000);
+    const dayAfter = new Date(nowPk.getTime() + 48 * 60 * 60 * 1000);
+    const isoDay = (d) =>
+      d.toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" }); // YYYY-MM-DD
+    const dateHelp =
+      `آج: ${pktTime}۔ ` +
+      `"کل/tomorrow" کا مطلب ${fmtDate(tomorrow)} (${isoDay(tomorrow)})۔ ` +
+      `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
+      `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
+    let brainInput = `(صرف آپ کی معلومات کے لیے — ${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
