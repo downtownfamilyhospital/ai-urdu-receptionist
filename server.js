@@ -314,7 +314,14 @@ app.post("/webhook", async (req, res) => {
     // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
     //    (For now we LOG it so we can test collection. Manager delivery
     //     via WhatsApp template is the next step once this works.)
-    if (meta.lead_complete && meta.lead_summary) {
+    // Only forward if the lead is genuinely complete: must have a name
+    // AND a contact number captured. This stops half-finished leads even
+    // if the AI marks complete too early.
+    const hasName = (meta.patient_name || "").trim().length > 1;
+    const hasNumber = (meta.contact_number || fromFormatted || "").replace(/[^0-9]/g, "").length >= 11;
+    if (meta.lead_complete && meta.lead_summary && (!hasName || !hasNumber)) {
+      console.log(`⏸️ Lead marked complete but missing ${!hasName ? "name" : "number"} — not forwarding yet`);
+    } else if (meta.lead_complete && meta.lead_summary) {
       const dept = meta.department || "general";
       console.log("==================================================");
       console.log(`✅ LEAD COMPLETE → department: ${dept}`);
