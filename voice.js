@@ -9,7 +9,7 @@
 import axios from "axios";
 import OpenAI, { toFile } from "openai";
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, timeout: 30000, maxRetries: 2 });
 const ACCESS_TOKEN = process.env.WA_ACCESS_TOKEN;
 
 // Step 1: WhatsApp gives us a media "id". We ask Meta for the real
