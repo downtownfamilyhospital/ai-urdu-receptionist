@@ -127,6 +127,7 @@ app.post("/webhook", async (req, res) => {
     // - voice note     → transcribe with Whisper (Phase 2A)
     // - anything else  → politely ask for text or voice
     let patientText = "";
+    let isVoiceNote = false;
     let wasVoice = false;
 
     if (message.type === "text") {
@@ -147,7 +148,10 @@ app.post("/webhook", async (req, res) => {
         const transcribed = await transcribeVoice(message.audio.id);
         console.log(`🎤 → transcribed: ${transcribed}`);
         // Tag it as voice so Zainab confirms she heard names/numbers right.
-        patientText = `(مریض نے وائس میسج بھیجا، جو ٹیکسٹ میں یہ بنا:) ${transcribed}\n(اگر اس میں نام، نمبر، یا پتہ ہو تو نرمی سے تصدیق کریں کہ آپ نے ٹھیک سنا — مریض غلط ہونے پر لکھ کر درست کر سکتا ہے)`;
+        // Keep the patient's words clean (this is what gets saved/shown).
+        // Any guidance for Zainab is added separately, not into patientText.
+        patientText = transcribed;
+        isVoiceNote = true;
       } catch (e) {
         console.error("Transcription error:", e.response?.data || e.message);
         await sendText(
@@ -276,6 +280,11 @@ app.post("/webhook", async (req, res) => {
       `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
       `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
     let brainInput = `(صرف آپ کی معلومات کے لیے — ${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
+    if (isVoiceNote) {
+      brainInput =
+        `(نوٹ: یہ مریض کا وائس میسج تھا جو ٹیکسٹ میں بدلا گیا۔ اگر اس میں مریض نے اپنا نام/نمبر/پتہ بتایا ہو تو نرمی سے تصدیق کر لیں کہ آپ نے ٹھیک سنا۔ اگر ایسی کوئی معلومات نہیں تھی تو تصدیق کا ذکر بالکل نہ کریں۔)\n\n` +
+        brainInput;
+    }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);

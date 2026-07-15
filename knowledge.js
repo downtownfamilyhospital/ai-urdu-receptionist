@@ -13,7 +13,9 @@ const CACHE_MINUTES = 30;   // refresh from Sheets every 30 minutes (faster resp
 
 // Tabs that are NOT hospital knowledge — skip them so the AI prompt
 // stays small and fast (these are data/operational tabs).
-const SKIP_TABS = ["Patients", "Corrections", "Managers"];
+// Managers tab IS included now — Zainab needs the manager WhatsApp numbers
+// so she can share them with patients (e.g. when a patient is waiting).
+const SKIP_TABS = ["Patients", "Corrections"];
 
 // Connect to Google using the "service account" (a robot Google login)
 function getAuth() {
