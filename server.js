@@ -128,19 +128,19 @@ app.post("/webhook", async (req, res) => {
     // - anything else  → politely ask for text or voice
     let patientText = "";
     let isVoiceNote = false;
+    let isImageMessage = false;
     let wasVoice = false;
 
     if (message.type === "text") {
       patientText = message.text.body;
     } else if (message.type === "image") {
-      // We do NOT process photos on this number. Politely tell the patient
-      // to describe what they need in text or voice. No hosting/forwarding.
-      console.log(`🖼️ ${from}: image received — telling patient we can't view photos`);
-      await sendText(
-        from,
-        "معذرت، اس واٹس ایپ نمبر پر میں تصویر نہیں دیکھ سکتی۔ 🌸 اگر آپ تھوڑی تفصیل text یا voice میں بتا دیں کہ آپ اس تصویر کے بارے میں کیا جاننا چاہتے ہیں، تو میں خوشی سے آپ کی مدد کر دوں گی۔"
-      );
-      return; // stop here — don't run the AI flow for a photo
+      // Images flow into the AI so she can respond by CONTEXT:
+      // medicine/prescription photo → refer to Pharmacy Manager;
+      // online-consultation payment screenshot → accept + confirm;
+      // otherwise → politely say she can't view images.
+      console.log(`🖼️ ${from}: image received — handling by conversation context`);
+      patientText = "(📷 مریض نے ایک تصویر بھیجی ہے)";
+      isImageMessage = true;
     } else if (message.type === "audio") {
       wasVoice = true;
       console.log(`🎤 ${from}: voice note received, transcribing...`);
@@ -285,6 +285,11 @@ app.post("/webhook", async (req, res) => {
         `(نوٹ: یہ مریض کا وائس میسج تھا جو ٹیکسٹ میں بدلا گیا۔ اگر اس میں مریض نے اپنا نام/نمبر/پتہ بتایا ہو تو نرمی سے تصدیق کر لیں کہ آپ نے ٹھیک سنا۔ اگر ایسی کوئی معلومات نہیں تھی تو تصدیق کا ذکر بالکل نہ کریں۔)\n\n` +
         brainInput;
     }
+    if (isImageMessage) {
+      brainInput =
+        `(نوٹ: مریض نے ابھی ایک تصویر بھیجی ہے جو آپ نہیں دیکھ سکتیں۔ گفتگو کے سیاق سے فیصلہ کریں: دوا/نسخے کا سیاق → معیاری فارمیسی پیغام کے ساتھ Pharmacy Manager کو ریفر کریں؛ آن لائن کنسلٹیشن کی ادائیگی کا سیاق → کوئی تصدیق نہ مانگیں، کہیں ٹیم payment confirm کر رہی ہے اور ڈاکٹر 10-15 منٹ میں video call کریں گے، نمبر ON رکھیں، اور lead فوراً مکمل کریں؛ ورنہ نرمی سے کہیں کہ آپ تصویر نہیں دیکھ سکتیں، text/voice میں تفصیل مانگیں۔)\n\n` +
+        brainInput;
+    }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
     if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
@@ -338,7 +343,11 @@ app.post("/webhook", async (req, res) => {
     // if the AI marks complete too early.
     const hasName = (meta.patient_name || "").trim().length > 1;
     const hasNumber = (meta.contact_number || fromFormatted || "").replace(/[^0-9]/g, "").length >= 11;
-    if (meta.lead_complete && meta.lead_summary && (!hasName || !hasNumber)) {
+    // NEW WORKFLOW: pharmacy never creates leads — always a direct referral
+    // to the Pharmacy Manager. Hard-block any pharmacy forward.
+    if (meta.lead_complete && (meta.department || "").toLowerCase() === "pharmacy") {
+      console.log(`🚫 Pharmacy lead blocked (referral-only workflow)`);
+    } else if (meta.lead_complete && meta.lead_summary && (!hasName || !hasNumber)) {
       console.log(`⏸️ Lead marked complete but missing ${!hasName ? "name" : "number"} — not forwarding yet`);
     } else if (meta.lead_complete && meta.lead_summary) {
       const dept = meta.department || "general";
