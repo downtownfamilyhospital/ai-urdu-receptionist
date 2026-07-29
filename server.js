@@ -360,11 +360,14 @@ app.post("/webhook", async (req, res) => {
       // Forward the lead to the relevant department manager's WhatsApp —
       // but NEVER forward a duplicate (same patient + same department
       // within 24h). Each template message costs money.
+      // "online" is a separate department but its leads go to the SAME
+      // hospital (appointment) manager number.
+      const managerDept = dept === "online" ? "appointment" : dept;
       if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
         let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}`;
-        await forwardLeadToManager(dept, fullSummary, fromFormatted);
+        await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
         await saveForwardedLead({
           whatsapp_number: fromFormatted,
           patient_name: meta.patient_name,
@@ -598,7 +601,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .conv .row2{display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px}
 .conv .last{font-size:13px;color:#8696a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;direction:rtl;text-align:right;line-height:1.8}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;flex-shrink:0}
-.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-general{background:#6a7175}
+.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-online{background:#7c4dff}.b-general{background:#6a7175}
 .needs{background:#ff5252;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;flex-shrink:0}
 .unread{background:#00a884;color:#fff;font-size:11px;font-weight:600;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;flex-shrink:0}
 .empty{text-align:center;color:#8696a0;padding:40px 20px;font-size:14px}
@@ -651,6 +654,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     <button class="chip" data-dept="lab">Lab</button>
     <button class="chip" data-dept="aesthetic">Aesthetic</button>
     <button class="chip" data-dept="appointment">Appointment</button>
+    <button class="chip" data-dept="online">Online Dr</button>
   </div>
   <div class="list" id="list"><div class="empty">Loading...</div></div>
 </div>
