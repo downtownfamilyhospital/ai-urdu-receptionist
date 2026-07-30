@@ -11,6 +11,9 @@ import { JSONFilePreset } from "lowdb/node";
 const db = await JSONFilePreset("hospital.json", { leads: [], messages: [], forwarded: [], deptState: {} });
 if (!db.data.forwarded) db.data.forwarded = []; // migrate older files
 if (!db.data.deptState) db.data.deptState = {}; // active department per patient
+if (!db.data.lastSeen) db.data.lastSeen = {}; // last activity per patient (5-min session reset)
+if (!db.data.langState) db.data.langState = {}; // "ur" | "en" per patient
+if (!db.data.menuCount) db.data.menuCount = {}; // how many times home menu shown (welcome variants)
 
 function nowISO() {
   return new Date().toISOString();
@@ -153,4 +156,32 @@ export async function setActiveDept(whatsapp_number, dept) {
   const d = (dept || "").toLowerCase();
   if (d) db.data.deptState[key] = d; else delete db.data.deptState[key];
   await db.write();
+}
+
+
+// ===== V2.2: inactivity tracking (5-minute session reset) =====
+export function minutesSinceLastActivity(whatsapp_number) {
+  const ts = db.data.lastSeen[normNum(whatsapp_number)];
+  if (!ts) return null; // never seen
+  return (Date.now() - new Date(ts).getTime()) / 60000;
+}
+export async function touchActivity(whatsapp_number) {
+  db.data.lastSeen[normNum(whatsapp_number)] = new Date().toISOString();
+  await db.write();
+}
+
+
+// ===== V2.3: language preference + welcome variant counter =====
+export function getLang(whatsapp_number) {
+  return db.data.langState[normNum(whatsapp_number)] || "";
+}
+export async function setLang(whatsapp_number, lang) {
+  db.data.langState[normNum(whatsapp_number)] = lang === "en" ? "en" : "ur";
+  await db.write();
+}
+export async function bumpMenuCount(whatsapp_number) {
+  const k = normNum(whatsapp_number);
+  db.data.menuCount[k] = (db.data.menuCount[k] || 0) + 1;
+  await db.write();
+  return db.data.menuCount[k];
 }

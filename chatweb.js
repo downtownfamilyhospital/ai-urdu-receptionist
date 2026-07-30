@@ -94,6 +94,12 @@ const FORMS = {
     { id:"tests", label:"Test Required", type:"textarea", req:true, ph:"کون سے ٹیسٹ" },
     { id:"home", label:"Home Sample Collection", type:"radio", req:true, opts:["Yes","No"] },
     { id:"address", label:"Address (if home collection)", type:"textarea", req:false, ph:"مکمل پتہ" } ] },
+  physio: { title: "Home Physiotherapy", sub: "گھر پر فزیوتھراپی", fields: [
+    { id:"name", label:"Name", type:"text", req:true, ph:"آپ کا نام" },
+    { id:"whatsapp", label:"WhatsApp Number", type:"tel", req:true, ph:"03XXXXXXXXX" },
+    { id:"address", label:"Address", type:"textarea", req:true, ph:"مکمل پتہ" },
+    { id:"problem", label:"Problem / Required Therapy", type:"text", req:true, ph:"مثلاً کمر درد، فالج بحالی" },
+    { id:"time", label:"Visit Time", type:"text", req:true, ph:"مثلاً کل صبح 11 بجے" } ] },
   nursing: { title: "Home Services", sub: "گھر پر نرسنگ سروس", fields: [
     { id:"name", label:"Name", type:"text", req:true, ph:"آپ کا نام" },
     { id:"whatsapp", label:"WhatsApp Number", type:"tel", req:true, ph:"03XXXXXXXXX" },

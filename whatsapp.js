@@ -35,48 +35,135 @@ export async function sendText(to, text) {
 
 // ===== V2: Interactive messages =====
 
-// Welcome menu: intro + 5-service list (WhatsApp list message).
-export async function sendWelcomeMenu(to) {
-  const body =
-    "السلام علیکم 🌸\nمیں زینب ہوں۔\nڈاؤن ٹاؤن فیملی ہسپتال، جی 10 مرکز، اسلام آباد میں خوش آمدید۔\nہم درج ذیل سہولیات فراہم کرتے ہیں:";
-  await axios.post(
-    `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
-    {
-      messaging_product: "whatsapp",
-      to,
-      type: "interactive",
-      interactive: {
-        type: "list",
-        body: { text: body },
-        action: {
-          button: "سروس منتخب کریں",
-          sections: [
-            {
-              title: "ہماری سہولیات",
-              rows: [
-                { id: "dept_online", title: "👨‍⚕️ آن لائن ڈاکٹر مشورہ" },
-                { id: "dept_pharmacy", title: "💊 گھر پر ادویات" },
-                { id: "dept_nursing", title: "🏥 گھر پر نرسنگ سروس" },
-                { id: "dept_lab", title: "🧪 گھر سے لیب نمونے" },
-                { id: "dept_aesthetic", title: "✨ ایستھیٹک اپائنٹمنٹ" },
-              ],
-            },
-          ],
+// Language selection — the very first message to any new patient.
+export async function sendLanguageSelect(to) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "button",
+          body: { text: "Welcome to Downtown Family Hospital! 🌸\nPlease select your preferred language.\nبراہ کرم اپنی پسندیدہ زبان منتخب کریں۔" },
+          action: { buttons: [
+            { type: "reply", reply: { id: "lang_ur", title: "اردو" } },
+            { type: "reply", reply: { id: "lang_en", title: "English" } },
+          ] },
         },
       },
-    },
-    { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
-  );
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
+    );
+  } catch (e) {
+    await sendText(to, "Please reply: Urdu or English\nبراہ کرم لکھیں: اردو یا English");
+  }
 }
 
-// Reply with a 🏠 ہوم button attached. Falls back to plain text for long replies.
-export async function sendTextWithHome(to, text) {
+// Rotating welcome texts — never the same greeting twice (variant = menuCount).
+const WELCOME_UR = [
+  "السلام علیکم! 🌸\nمیں زینب ہوں — *ڈاؤن ٹاؤن فیملی ہسپتال* میں دل سے خوش آمدید!\n\n✔ ہم ایک *IHRA رجسٹرڈ ہسپتال* ہیں\n✔ پتہ: Belle Road، جی 10 مرکز، اسلام آباد\n✔ اپنی تمام ہیلتھ سروسز کی ہم مکمل ذمہ داری لیتے ہیں\n✔ مزید معلومات: www.dfh.com.pk\n\nآپ مجھ سے کوئی بھی سوال پوچھ سکتے ہیں 🙂 یا نیچے سے اپنی سروس منتخب کریں:",
+  "جی آیاں نوں! 🌸 میں زینب حاضر ہوں۔\nکوئی سوال ہو تو بلا جھجک پوچھیں، یا نیچے دی گئی سروسز میں سے انتخاب فرمائیں:",
+  "خوش آمدید! 🙂 بتائیں آج کس چیز میں مدد کروں؟\nنیچے ہماری سروسز کی فہرست موجود ہے — اپنی ضرورت کی سروس چن لیں:",
+  "السلام علیکم! 🌸 زینب آپ کی خدمت میں حاضر ہے۔\nہماری سروسز نیچے دیکھیں اور جو چاہیے منتخب کر لیں — یا کوئی بھی سوال لکھ دیں:",
+];
+const WELCOME_EN = [
+  "Welcome! 🌸 I'm Zainab from *Downtown Family Hospital*.\n\n✔ We are an *IHRA Registered Hospital*\n✔ Located at Belle Road, G-10 Markaz, Islamabad\n✔ We take full responsibility for all our health services\n✔ More info: www.dfh.com.pk\n\nAsk me anything 🙂 or select a service below:",
+  "Good to see you again! 🌸 How can I help today?\nFeel free to ask any question, or pick a service from the list below:",
+  "Welcome back! 🙂 What can I do for you today?\nOur services are listed below — choose the one you need:",
+  "Hello again! 🌸 Zainab at your service.\nAsk me anything, or select from our services below:",
+];
+
+// Welcome menu: rotating intro + 6-service list (per spec).
+export async function sendWelcomeMenu(to, lang = "ur", variant = 1) {
+  const texts = lang === "en" ? WELCOME_EN : WELCOME_UR;
+  const body = variant <= 1 ? texts[0] : texts[1 + ((variant - 2) % (texts.length - 1))];
+  const rows = lang === "en" ? [
+    { id: "dept_online", title: "👨‍⚕️ Online Doctor" },
+    { id: "dept_pharmacy", title: "💊 Medicine Delivery" },
+    { id: "dept_nursing", title: "🏥 Home Nursing" },
+    { id: "dept_lab", title: "🧪 Lab Home Sampling" },
+    { id: "dept_aesthetic", title: "✨ Aesthetic Appointment" },
+    { id: "dept_physio", title: "💪 Home Physiotherapy" },
+  ] : [
+    { id: "dept_online", title: "👨‍⚕️ آن لائن ڈاکٹر مشورہ" },
+    { id: "dept_pharmacy", title: "💊 گھر پر ادویات" },
+    { id: "dept_nursing", title: "🏥 گھر پر نرسنگ سروس" },
+    { id: "dept_lab", title: "🧪 گھر سے لیب نمونے" },
+    { id: "dept_aesthetic", title: "✨ ایستھیٹک اپائنٹمنٹ" },
+    { id: "dept_physio", title: "💪 ہوم فزیوتھراپی" },
+  ];
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "list",
+          body: { text: body },
+          action: { button: lang === "en" ? "Select a service" : "سروس منتخب کریں",
+            sections: [{ title: lang === "en" ? "Our Services" : "ہماری سہولیات", rows }] },
+        },
+      },
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
+    );
+  } catch (e) {
+    console.error("welcome menu failed, falling back:", e.response?.data?.error?.message || e.message);
+    await sendText(to, body + (lang === "en"
+      ? "\n\n1. Online Doctor  2. Medicine Delivery  3. Home Nursing  4. Lab Sampling  5. Aesthetic  6. Physiotherapy"
+      : "\n\n1. آن لائن ڈاکٹر  2. ادویات  3. نرسنگ  4. لیب  5. ایستھیٹک  6. فزیوتھراپی"));
+  }
+}
+
+// ===== WhatsApp Flows scaffold (activates when Meta Flow IDs are configured) =====
+// Set env WA_FLOWS='{"online":"<flow_id>","pharmacy":"...","lab":"...","nursing":"...","aesthetic":"...","physio":"..."}'
+export function flowsConfigured() {
+  try { return Object.keys(JSON.parse(process.env.WA_FLOWS || "{}")).length > 0; } catch { return false; }
+}
+export async function sendFlow(to, dept, lang = "ur") {
+  const flows = JSON.parse(process.env.WA_FLOWS || "{}");
+  const flowId = flows[dept];
+  if (!flowId) return false;
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to,
+        type: "interactive",
+        interactive: {
+          type: "flow",
+          body: { text: lang === "en" ? "Please fill this short form 🌸" : "براہ کرم یہ مختصر فارم مکمل کریں 🌸" },
+          action: {
+            name: "flow",
+            parameters: {
+              flow_message_version: "3",
+              flow_id: flowId,
+              flow_cta: lang === "en" ? "Open Form" : "فارم کھولیں",
+              flow_action: "navigate",
+            },
+          },
+        },
+      },
+      { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
+    );
+    return true;
+  } catch (e) {
+    console.error("flow send failed (falling back to text form):", e.response?.data?.error?.message || e.message);
+    return false;
+  }
+}
+
+// Reply with a 🏠 ہوم button// Reply with a 🏠 ہوم button attached. Falls back to plain text for long replies.
+export async function sendTextWithHome(to, text, lang = "ur") {
   const t = (text || "").trim();
   if (!t) return;
   if (t.length > 980) {
     // interactive body limit ~1024 chars — send text, then a tiny Home chip
     await sendText(to, t);
-    return sendHomeChip(to);
+    return sendHomeChip(to, lang);
   }
   try {
     await axios.post(
@@ -88,7 +175,7 @@ export async function sendTextWithHome(to, text) {
         interactive: {
           type: "button",
           body: { text: t },
-          action: { buttons: [{ type: "reply", reply: { id: "home", title: "🏠 ہوم" } }] },
+          action: { buttons: [{ type: "reply", reply: { id: "home", title: lang === "en" ? "🏠 Home" : "🏠 ہوم" } }] },
         },
       },
       { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
@@ -100,7 +187,7 @@ export async function sendTextWithHome(to, text) {
   }
 }
 
-async function sendHomeChip(to) {
+async function sendHomeChip(to, lang = "ur") {
   try {
     await axios.post(
       `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
@@ -111,7 +198,7 @@ async function sendHomeChip(to) {
         interactive: {
           type: "button",
           body: { text: "🌸" },
-          action: { buttons: [{ type: "reply", reply: { id: "home", title: "🏠 ہوم" } }] },
+          action: { buttons: [{ type: "reply", reply: { id: "home", title: lang === "en" ? "🏠 Home" : "🏠 ہوم" } }] },
         },
       },
       { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }

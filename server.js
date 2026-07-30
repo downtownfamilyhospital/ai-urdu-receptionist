@@ -31,7 +31,7 @@ try {
 
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
-import { sendText, sendTextWithHome, sendWelcomeMenu } from "./whatsapp.js";
+import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect } from "./whatsapp.js";
 import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
@@ -54,6 +54,11 @@ import {
   getForwardedLeads,
   getActiveDept,
   setActiveDept,
+  minutesSinceLastActivity,
+  touchActivity,
+  getLang,
+  setLang,
+  bumpMenuCount,
 } from "./database.js";
 
 const app = express();
@@ -106,7 +111,7 @@ app.post("/chat/api/message", async (req, res) => {
       const dept = (meta.department || "general").toLowerCase();
       const num = (meta.contact_number || "").replace(/[^0-9]/g, "");
       if (num.length >= 10) {
-        const managerDept = (dept === "online" || dept === "nursing" || dept === "lab") ? "appointment" : dept;
+        const managerDept = (dept === "online" || dept === "nursing" || dept === "lab" || dept === "physio") ? "appointment" : dept;
         const key = "+92" + num.replace(/^0/, "").replace(/^92/, "");
         if (!wasRecentlyForwarded(key, dept, 24)) {
           await forwardLeadToManager(managerDept, `${meta.lead_summary}\nPatient name: ${meta.patient_name}\n(Source: Website chat)`, key);
@@ -196,12 +201,19 @@ app.post("/webhook", async (req, res) => {
 
     if (message.type === "interactive") {
       const id = message.interactive?.list_reply?.id || message.interactive?.button_reply?.id || "";
+      if (id === "lang_ur" || id === "lang_en") {
+        await setLang(fromFormatted, id === "lang_en" ? "en" : "ur");
+        const v = await bumpMenuCount(fromFormatted);
+        await sendWelcomeMenu(from, getLang(fromFormatted), v);
+        return;
+      }
       if (id === "home") {
         await setActiveDept(fromFormatted, "");
-        await sendWelcomeMenu(from);
+        const v = await bumpMenuCount(fromFormatted);
+        await sendWelcomeMenu(from, getLang(fromFormatted) || "ur", v);
         return; // menu shown; wait for choice
       }
-      const deptMap = { dept_online: "online", dept_pharmacy: "pharmacy", dept_nursing: "nursing", dept_lab: "lab", dept_aesthetic: "aesthetic" };
+      const deptMap = { dept_appointment: "appointment", dept_online: "online", dept_pharmacy: "pharmacy", dept_nursing: "nursing", dept_lab: "lab", dept_aesthetic: "aesthetic", dept_physio: "physio" };
       if (deptMap[id]) {
         await setActiveDept(fromFormatted, deptMap[id]);
         // Let the brain open the chosen department naturally.
@@ -213,19 +225,37 @@ app.post("/webhook", async (req, res) => {
       patientText = message.text.body;
       const lower0 = patientText.trim().toLowerCase();
       // Typed Home also resets
-      if (["ہوم", "home", "🏠", "🏠 ہوم", "menu", "مینو"].includes(lower0)) {
+      if (["ہوم", "home", "🏠", "🏠 ہوم", "🏠 home", "menu", "مینو"].includes(lower0)) {
         await setActiveDept(fromFormatted, "");
-        await sendWelcomeMenu(from);
+        const v = await bumpMenuCount(fromFormatted);
+        await sendWelcomeMenu(from, getLang(fromFormatted) || "ur", v);
         return;
       }
+      // Language switch by typing
+      if (["english", "انگلش", "انگریزی"].includes(lower0)) { await setLang(fromFormatted, "en"); await sendTextWithHome(from, "Language set to English ✅ How can I help you?", "en"); return; }
+      if (["urdu", "اردو"].includes(lower0)) { await setLang(fromFormatted, "ur"); await sendTextWithHome(from, "زبان اردو ہو گئی ✅ بتائیں کیا مدد کروں؟", "ur"); return; }
       // Pure greeting on a fresh conversation → intro + menu (deterministic welcome)
       const greetings = ["hi","hello","hey","salam","aoa","assalamualaikum","assalam o alaikum","السلام علیکم","سلام","اسلام علیکم"];
       if (greetings.includes(lower0.replace(/[!.،۔]/g, "").trim())) {
-        const hist0 = await loadConversation(fromFormatted);
-        if (!hist0 || hist0.length === 0) {
-          await sendWelcomeMenu(from);
+        if (!getLang(fromFormatted)) {
+          await sendLanguageSelect(from); // very first contact: language choice
           return;
         }
+        const hist0 = await loadConversation(fromFormatted);
+        if (!hist0 || hist0.length === 0) {
+          const v = await bumpMenuCount(fromFormatted);
+          await sendWelcomeMenu(from, getLang(fromFormatted), v);
+          return;
+        }
+      }
+      // Brand-new patient with a non-greeting message: ask language once, remember their question is coming next
+      if (!getLang(fromFormatted)) {
+        const hist0 = await loadConversation(fromFormatted);
+        if (!hist0 || hist0.length === 0) {
+          await sendLanguageSelect(from);
+          return;
+        }
+        await setLang(fromFormatted, "ur"); // legacy patients default to Urdu
       }
     } else if (message.type === "image") {
       // Images flow into the AI so she can respond by CONTEXT:
@@ -345,6 +375,7 @@ app.post("/webhook", async (req, res) => {
     const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
 
     let history = loadedHistory;
+    if (sessionReset) history = []; // fresh session — forget earlier conversation state
     if (!history || history.length === 0) history = getRecentHistory(from);
 
     // 1b. ALWAYS load saved patient details so Zainab never re-asks.
@@ -373,10 +404,23 @@ app.post("/webhook", async (req, res) => {
       `"کل/tomorrow" کا مطلب ${fmtDate(tomorrow)} (${isoDay(tomorrow)})۔ ` +
       `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
       `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
+    // ===== 5-minute inactivity reset (rules 6-7): fresh session =====
+    let sessionReset = false;
+    const idleMin = minutesSinceLastActivity(fromFormatted);
+    if (idleMin !== null && idleMin > 5) {
+      await setActiveDept(fromFormatted, "");
+      try { await clearConversation(fromFormatted); } catch (e) {}
+      sessionReset = true;
+      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
+    }
+    await touchActivity(fromFormatted);
+
     const activeDept = getActiveDept(fromFormatted);
-    const deptNote = activeDept
+    const lang = getLang(fromFormatted) || "ur";
+    const langNote = lang === "en" ? "(زبان: English) " : "(زبان: اردو) ";
+    const deptNote = langNote + (activeDept
       ? `فعال شعبہ: ${activeDept} — صرف اسی شعبے کے اصول استعمال کریں، دوسرے شعبے نہ ملائیں۔ `
-      : "";
+      : "");
     let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (isVoiceNote) {
       brainInput =
@@ -408,11 +452,17 @@ app.post("/webhook", async (req, res) => {
       .replace(/اردو[^۔\n]*معزرت[^۔\n]*۔?/g, "")
       .trim();
     if (!safeReply) safeReply = "جی، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟ 🌸";
-    await sendTextWithHome(from, safeReply);
+    await sendTextWithHome(from, safeReply, lang);
     console.log(`🤖 → ${from}: ${safeReply.slice(0, 60)}...`);
     // Keep the department state machine in sync with the brain's detection.
     if ((meta.department || "") !== activeDept) {
       await setActiveDept(fromFormatted, meta.department || "");
+    }
+    // Rules 3-5: brain requested the menu (service selection / return home).
+    if (meta.show_menu) {
+      await setActiveDept(fromFormatted, "");
+      const v = await bumpMenuCount(fromFormatted);
+      await sendWelcomeMenu(from, lang, v); // second message: home menu
     }
 
     // 5. Save everything (after the reply is already on its way).
@@ -465,7 +515,7 @@ app.post("/webhook", async (req, res) => {
       // "online" is a separate department but its leads go to the SAME
       // hospital (appointment) manager number.
       // Per latest workflow: online, nursing AND lab leads all go to the Hospital Manager.
-      const managerDept = (dept === "online" || dept === "nursing" || dept === "lab") ? "appointment" : dept;
+      const managerDept = (dept === "online" || dept === "nursing" || dept === "lab" || dept === "physio") ? "appointment" : dept;
       if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
@@ -704,7 +754,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .conv .row2{display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px}
 .conv .last{font-size:13px;color:#8696a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;direction:rtl;text-align:right;line-height:1.8}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;flex-shrink:0}
-.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-online{background:#7c4dff}.b-nursing{background:#ff9800}.b-general{background:#6a7175}
+.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-online{background:#7c4dff}.b-nursing{background:#ff9800}.b-physio{background:#00bcd4}.b-general{background:#6a7175}
 .needs{background:#ff5252;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;flex-shrink:0}
 .unread{background:#00a884;color:#fff;font-size:11px;font-weight:600;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;flex-shrink:0}
 .empty{text-align:center;color:#8696a0;padding:40px 20px;font-size:14px}
@@ -757,7 +807,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     <button class="chip" data-dept="lab">Lab</button>
     <button class="chip" data-dept="aesthetic">Aesthetic</button>
     <button class="chip" data-dept="appointment">Appointment</button>
-    <button class="chip" data-dept="online">Online Dr</button>\n    <button class="chip" data-dept="nursing">Nursing</button>
+    <button class="chip" data-dept="online">Online Dr</button>\n    <button class="chip" data-dept="nursing">Nursing</button>\n    <button class="chip" data-dept="physio">Physio</button>
   </div>
   <div class="list" id="list"><div class="empty">Loading...</div></div>
 </div>
