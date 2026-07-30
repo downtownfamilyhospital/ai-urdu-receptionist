@@ -73,6 +73,96 @@ const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// =========================================================
+//  SERVICE OPERATING HOURS (Pakistan Standard Time) — HARD GATE
+//  Enforced in CODE, before any AI call, info collection or
+//  lead: outside hours the patient gets ONLY the closure
+//  message. Pharmacy is 24/7 (never gated). appointment /
+//  aesthetic are hospital-visit referrals — not gated here.
+// =========================================================
+const SERVICE_HOURS = {
+  online: { open: 9, close: 23 },  // 9:00 AM – 11:00 PM
+  nursing: { open: 9, close: 22 }, // 9:00 AM – 10:00 PM
+  physio: { open: 9, close: 22 },  // 9:00 AM – 10:00 PM
+  lab: { open: 9, close: 22 },     // 9:00 AM – 10:00 PM
+};
+
+function pkHourNow() {
+  return parseInt(
+    new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi", hour: "2-digit", hour12: false }),
+    10
+  );
+}
+
+// Returns the closure message if `dept` is currently CLOSED, else null.
+function serviceClosedMessage(dept, lang = "ur") {
+  const rule = SERVICE_HOURS[(dept || "").toLowerCase()];
+  if (!rule) return null; // pharmacy / appointment / aesthetic / general — never gated
+  const h = pkHourNow();
+  if (h >= rule.open && h < rule.close) return null; // open now
+
+  const MSGS = {
+    online: {
+      en:
+        "Thank you for contacting Downtown Family Hospital.\n" +
+        "Our Online Doctor Consultation service is currently closed.\n" +
+        "Service hours are daily from *9:00 AM to 11:00 PM* (Pakistan Standard Time).\n" +
+        "Please contact us again after 9:00 AM and our doctors will be happy to assist you.\n" +
+        "If your condition is urgent or severe, please visit your nearest emergency department or hospital immediately.\n" +
+        "Thank you.",
+      ur:
+        "ڈاؤن ٹاؤن فیملی ہسپتال سے رابطے کا شکریہ 🌸\n" +
+        "ہماری آن لائن ڈاکٹر مشورہ سروس اس وقت بند ہے۔\n" +
+        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات 11 بجے تک* (پاکستانی وقت) ہیں۔\n" +
+        "براہِ کرم صبح 9 بجے کے بعد دوبارہ رابطہ کریں — ہمارے ڈاکٹرز آپ کی مدد کے لیے حاضر ہوں گے۔\n" +
+        "اگر آپ کی حالت سنگین یا ہنگامی ہے تو براہِ کرم فوراً قریب ترین ایمرجنسی یا ہسپتال تشریف لے جائیں۔\n" +
+        "شکریہ۔",
+    },
+    physio: {
+      en:
+        "Our Home Physiotherapy service is currently unavailable.\n" +
+        "Service hours are daily from *9:00 AM to 10:00 PM*.\n" +
+        "Please contact us again during service hours.\n" +
+        "If immediate medical attention is required, please visit the nearest healthcare facility.\n" +
+        "Thank you.",
+      ur:
+        "ہماری ہوم فزیوتھراپی سروس اس وقت دستیاب نہیں ہے۔\n" +
+        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات 10 بجے تک* ہیں۔\n" +
+        "براہِ کرم انہی اوقات میں دوبارہ رابطہ کریں۔\n" +
+        "اگر فوری طبی مدد درکار ہو تو براہِ کرم قریب ترین طبی مرکز تشریف لے جائیں۔\n" +
+        "شکریہ۔",
+    },
+    nursing: {
+      en:
+        "Our Home Nursing service is currently unavailable.\n" +
+        "Service hours are daily from *9:00 AM to 10:00 PM*.\n" +
+        "Please contact us again during service hours.\n" +
+        "If immediate medical attention is required, please visit the nearest healthcare facility.\n" +
+        "Thank you.",
+      ur:
+        "ہماری ہوم نرسنگ سروس اس وقت دستیاب نہیں ہے۔\n" +
+        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات 10 بجے تک* ہیں۔\n" +
+        "براہِ کرم انہی اوقات میں دوبارہ رابطہ کریں۔\n" +
+        "اگر فوری طبی مدد درکار ہو تو براہِ کرم قریب ترین طبی مرکز تشریف لے جائیں۔\n" +
+        "شکریہ۔",
+    },
+    lab: {
+      en:
+        "Our Home Lab Sample Collection service is currently unavailable.\n" +
+        "Service hours are daily from *9:00 AM to 10:00 PM*.\n" +
+        "Please contact us again during service hours.\n" +
+        "Thank you.",
+      ur:
+        "ہماری ہوم لیب سیمپل کلیکشن سروس اس وقت دستیاب نہیں ہے۔\n" +
+        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات 10 بجے تک* ہیں۔\n" +
+        "براہِ کرم انہی اوقات میں دوبارہ رابطہ کریں۔\n" +
+        "شکریہ۔",
+    },
+  };
+  const m = MSGS[(dept || "").toLowerCase()];
+  return m ? (lang === "en" ? m.en : m.ur) : null;
+}
+
 // ---- Health check (so you can confirm the server is alive) ----
 // ================= WEB CHAT (form-card interface) =================
 const webHistory = new Map(); // session -> [{role,content}] (in-memory)
@@ -106,6 +196,18 @@ app.post("/chat/api/message", async (req, res) => {
       userText;
 
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, hist);
+
+    // HARD SERVICE-HOURS GATE (web chat): closed service → closure message
+    // only; no form, no lead.
+    const webDept = (meta.department || "").toLowerCase();
+    const webClosedMsg = serviceClosedMessage(webDept, meta.lang === "en" ? "en" : "ur");
+    if (webClosedMsg) {
+      console.log(`⏰ Service-hours gate (web): ${webDept} closed — closure message sent`);
+      hist.push({ role: "user", content: userText });
+      hist.push({ role: "assistant", content: webClosedMsg });
+      webHistory.set(session, hist);
+      return res.json({ reply: webClosedMsg, show_form: "" });
+    }
 
     // maintain short history
     hist.push({ role: "user", content: userText });
@@ -237,6 +339,16 @@ app.post("/webhook", async (req, res) => {
           ? `(Patient selected this aesthetic treatment from the list: ${title}) I am interested in this.`
           : `(مریض نے ایستھیٹک فہرست سے یہ treatment چنی ہے: ${title}) مجھے اس میں دلچسپی ہے۔`;
       } else if (deptMap[id]) {
+        // HARD SERVICE-HOURS GATE (menu selection): if the chosen service is
+        // closed right now (PKT), send ONLY the closure message — no AI call,
+        // no info collection, no lead, no department state.
+        const gateLang = getLang(fromFormatted) || "ur";
+        const closedMsg = serviceClosedMessage(deptMap[id], gateLang);
+        if (closedMsg) {
+          console.log(`⏰ Service-hours gate: ${deptMap[id]} closed (PKT hour ${pkHourNow()}) — closure message sent`);
+          await sendTextWithHome(from, closedMsg, gateLang);
+          return;
+        }
         await setActiveDept(fromFormatted, deptMap[id]);
         // Let the brain open the chosen department naturally — in the
         // patient's chosen language (English injection keeps replies English).
@@ -442,6 +554,21 @@ app.post("/webhook", async (req, res) => {
     const activeDept = getActiveDept(fromFormatted);
     const storedLang = getLang(fromFormatted);
     const lang = storedLang || "ur";
+
+    // HARD SERVICE-HOURS GATE (active workflow): the ongoing service just
+    // closed → stop the workflow, wipe its state, send only the closure
+    // message. EXCEPTION: an image in the online dept may be the payment
+    // screenshot of an already-paying patient — never block that.
+    const activeClosedMsg = serviceClosedMessage(activeDept, lang);
+    if (activeClosedMsg && !(activeDept === "online" && isImageMessage)) {
+      console.log(`⏰ Service-hours gate: active ${activeDept} closed (PKT hour ${pkHourNow()}) — workflow stopped`);
+      await setActiveDept(fromFormatted, "");
+      await clearCollected(fromFormatted);
+      await sendTextWithHome(from, activeClosedMsg, lang);
+      saveMessage(from, "user", patientText);
+      saveMessage(from, "assistant", activeClosedMsg);
+      return;
+    }
     const langNote = !storedLang
       ? "LANGUAGE NOT SET YET — Detect from the patient's message: English message → reply in simple professional English and set META lang:\"en\". Urdu or Roman Urdu message → reply in pure Urdu and set META lang:\"ur\". "
       : lang === "en"
@@ -507,6 +634,22 @@ app.post("/webhook", async (req, res) => {
     // If this is a sales/marketing pitch, stay silent (no reply, no saves).
     if (meta.stay_silent) {
       console.log(`🤐 ${from}: sales/marketing pitch — staying silent`);
+      return;
+    }
+
+    // HARD SERVICE-HOURS GATE (AI detection): the brain identified a service
+    // from free text that is CLOSED right now → override its reply with the
+    // closure message. No info collection, no lead, no department state.
+    // (Same online-screenshot exception as above.)
+    const detectedDept = (meta.department || "").toLowerCase();
+    const detectedClosedMsg = serviceClosedMessage(detectedDept, lang);
+    if (detectedClosedMsg && !(detectedDept === "online" && isImageMessage)) {
+      console.log(`⏰ Service-hours gate: detected ${detectedDept} closed (PKT hour ${pkHourNow()}) — AI reply overridden`);
+      await setActiveDept(fromFormatted, "");
+      await clearCollected(fromFormatted);
+      await sendTextWithHome(from, detectedClosedMsg, lang);
+      saveMessage(from, "user", patientText);
+      saveMessage(from, "assistant", detectedClosedMsg);
       return;
     }
 
