@@ -203,16 +203,14 @@ app.post("/chat/api/message", async (req, res) => {
 
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, hist);
 
-    // HARD SERVICE-HOURS GATE (web chat): closed service → closure message
-    // only; no form, no lead.
+    // SERVICE-HOURS (web chat): information stays 24/7; while the service is
+    // closed for booking, suppress the form and block the lead below.
     const webDept = (meta.department || "").toLowerCase();
-    const webClosedMsg = serviceClosedMessage(webDept, meta.lang === "en" ? "en" : "ur");
-    if (webClosedMsg) {
-      console.log(`⏰ Service-hours gate (web): ${webDept} closed — closure message sent`);
-      hist.push({ role: "user", content: userText });
-      hist.push({ role: "assistant", content: webClosedMsg });
-      webHistory.set(session, hist);
-      return res.json({ reply: webClosedMsg, show_form: "" });
+    const webBookingClosed = !!serviceClosedMessage(webDept, "ur");
+    if (webBookingClosed) {
+      console.log(`⏰ Booking closed (web): ${webDept} — form suppressed, lead blocked`);
+      meta.show_form = "";
+      meta.lead_complete = false;
     }
 
     // maintain short history
@@ -345,16 +343,9 @@ app.post("/webhook", async (req, res) => {
           ? `(Patient selected this aesthetic treatment from the list: ${title}) I am interested in this.`
           : `(مریض نے ایستھیٹک فہرست سے یہ treatment چنی ہے: ${title}) مجھے اس میں دلچسپی ہے۔`;
       } else if (deptMap[id]) {
-        // HARD SERVICE-HOURS GATE (menu selection): if the chosen service is
-        // closed right now (PKT), send ONLY the closure message — no AI call,
-        // no info collection, no lead, no department state.
-        const gateLang = getLang(fromFormatted) || "ur";
-        const closedMsg = serviceClosedMessage(deptMap[id], gateLang);
-        if (closedMsg) {
-          console.log(`⏰ Service-hours gate: ${deptMap[id]} closed (PKT hour ${pkHourNow()}) — closure message sent`);
-          await sendTextWithHome(from, closedMsg, gateLang);
-          return;
-        }
+        // NOTE: no hard block here — INFORMATION is 24/7. If the service is
+        // closed for booking, the booking-closed note (below) makes the AI
+        // answer questions but never collect info or create a lead.
         await setActiveDept(fromFormatted, deptMap[id]);
         // Let the brain open the chosen department naturally — in the
         // patient's chosen language (English injection keeps replies English).
@@ -561,20 +552,17 @@ app.post("/webhook", async (req, res) => {
     const storedLang = getLang(fromFormatted);
     const lang = storedLang || "ur";
 
-    // HARD SERVICE-HOURS GATE (active workflow): the ongoing service just
-    // closed → stop the workflow, wipe its state, send only the closure
-    // message. EXCEPTION: an image in the online dept may be the payment
-    // screenshot of an already-paying patient — never block that.
+    // SERVICE-HOURS SEPARATION: information is 24/7; only BOOKING is gated.
+    // If the active service is closed for booking, inject a note so the AI
+    // answers every question fully but never collects info or completes a
+    // lead — and politely gives the hours if the patient wants to book.
+    // (Exception: online payment screenshots are never gated.)
     const activeClosedMsg = serviceClosedMessage(activeDept, lang);
-    if (activeClosedMsg && !(activeDept === "online" && isImageMessage)) {
-      console.log(`⏰ Service-hours gate: active ${activeDept} closed (PKT hour ${pkHourNow()}) — workflow stopped`);
-      await setActiveDept(fromFormatted, "");
-      await clearCollected(fromFormatted);
-      await sendTextWithHome(from, activeClosedMsg, lang);
-      saveMessage(from, "user", patientText);
-      saveMessage(from, "assistant", activeClosedMsg);
-      return;
-    }
+    const bookingClosed = !!activeClosedMsg && !(activeDept === "online" && isImageMessage);
+    const bookingClosedNote = bookingClosed
+      ? `اہم — بُکنگ اس وقت بند ہے (معلومات چوبیس گھنٹے کھلی ہیں): مریض کے تمام معلوماتی سوالوں (فیس، ڈاکٹر، اوقات، سہولیات وغیرہ) کے مکمل جواب دیں، مگر کوئی ذاتی معلومات جمع نہ کریں (نہ نام، نہ نمبر، نہ پتہ، نہ علامات) اور lead_complete کبھی true نہ کریں۔ مریض بُکنگ کرنا چاہے تو نرمی سے بتائیں: یہ سروس روزانہ [آن لائن: صبح 9 تا رات ساڑھے 11 | نرسنگ/فزیو/لیب: صبح 9 تا رات 10] بُکنگ لیتی ہے — انہی اوقات میں رابطہ کریں تو میں فوراً بُک کر دوں گی۔ `
+      : "";
+    if (bookingClosed) console.log(`⏰ Booking closed for ${activeDept} (PKT ${pkHourNow()}) — info-only mode`);
     const langNote = !storedLang
       ? "LANGUAGE NOT SET YET — Detect from the patient's message: English message → reply in simple professional English and set META lang:\"en\". Urdu or Roman Urdu message → reply in pure Urdu and set META lang:\"ur\". "
       : lang === "en"
@@ -599,7 +587,7 @@ app.post("/webhook", async (req, res) => {
         collectedNote = `پہلے سے موصول معلومات (دوبارہ کبھی نہ پوچھیں، خاموشی سے استعمال کریں): ${parts.join("، ")}۔ `;
       }
     }
-    let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${collectedNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
+    let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${bookingClosedNote}${collectedNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (isVoiceNote) {
       brainInput =
         `(نوٹ: یہ مریض کا وائس میسج تھا جو ٹیکسٹ میں بدلا گیا۔ اگر اس میں مریض نے اپنا نام/نمبر/پتہ بتایا ہو تو نرمی سے تصدیق کر لیں کہ آپ نے ٹھیک سنا۔ اگر ایسی کوئی معلومات نہیں تھی تو تصدیق کا ذکر بالکل نہ کریں۔)\n\n` +
@@ -643,21 +631,8 @@ app.post("/webhook", async (req, res) => {
       return;
     }
 
-    // HARD SERVICE-HOURS GATE (AI detection): the brain identified a service
-    // from free text that is CLOSED right now → override its reply with the
-    // closure message. No info collection, no lead, no department state.
-    // (Same online-screenshot exception as above.)
-    const detectedDept = (meta.department || "").toLowerCase();
-    const detectedClosedMsg = serviceClosedMessage(detectedDept, lang);
-    if (detectedClosedMsg && !(detectedDept === "online" && isImageMessage)) {
-      console.log(`⏰ Service-hours gate: detected ${detectedDept} closed (PKT hour ${pkHourNow()}) — AI reply overridden`);
-      await setActiveDept(fromFormatted, "");
-      await clearCollected(fromFormatted);
-      await sendTextWithHome(from, detectedClosedMsg, lang);
-      saveMessage(from, "user", patientText);
-      saveMessage(from, "assistant", detectedClosedMsg);
-      return;
-    }
+    // (Information stays 24/7 — no reply override here. Booking is enforced
+    // deterministically at the lead stage below.)
 
     // 4. SEND THE REPLY FIRST so the patient gets a fast response,
     //    THEN do the saves (patient isn't kept waiting on Sheet writes).
@@ -722,6 +697,14 @@ app.post("/webhook", async (req, res) => {
     // to the Pharmacy Manager. Hard-block any pharmacy forward.
     if (meta.lead_complete && ["pharmacy", "appointment"].includes((meta.department || "").toLowerCase())) {
       console.log(`🚫 ${meta.department} lead blocked (referral-only workflow)`);
+    } else if (
+      // HARD BOOKING-HOURS BLOCK: no lead may EVER be created while the
+      // service is closed (online payment screenshots excepted).
+      meta.lead_complete &&
+      serviceClosedMessage((meta.department || "").toLowerCase(), lang) &&
+      !((meta.department || "").toLowerCase() === "online" && isImageMessage)
+    ) {
+      console.log(`⏰ Lead blocked — ${meta.department} is closed for booking (PKT ${pkHourNow()})`);
     } else if (meta.lead_complete && (!hasName || !hasNumber)) {
       console.log(`⏸️ Lead marked complete but missing ${!hasName ? "name" : "number"} — not forwarding yet`);
     } else if (meta.lead_complete) {
