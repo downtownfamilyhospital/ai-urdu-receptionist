@@ -31,7 +31,7 @@ try {
 
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
-import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect } from "./whatsapp.js";
+import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu } from "./whatsapp.js";
 import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
@@ -214,10 +214,26 @@ app.post("/webhook", async (req, res) => {
         return; // menu shown; wait for choice
       }
       const deptMap = { dept_appointment: "appointment", dept_online: "online", dept_pharmacy: "pharmacy", dept_nursing: "nursing", dept_lab: "lab", dept_aesthetic: "aesthetic", dept_physio: "physio" };
-      if (deptMap[id]) {
+      if (id === "dept_aesthetic") {
+        await setActiveDept(fromFormatted, "aesthetic");
+        await sendAestheticMenu(from, getLang(fromFormatted) || "ur");
+        return; // wait for the treatment choice
+      }
+      if (id.startsWith("aes_")) {
+        await setActiveDept(fromFormatted, "aesthetic");
+        const title = message.interactive?.list_reply?.title || "aesthetic service";
+        const selLang0 = getLang(fromFormatted) || "ur";
+        patientText = selLang0 === "en"
+          ? `(Patient selected this aesthetic treatment from the list: ${title}) I am interested in this.`
+          : `(مریض نے ایستھیٹک فہرست سے یہ treatment چنی ہے: ${title}) مجھے اس میں دلچسپی ہے۔`;
+      } else if (deptMap[id]) {
         await setActiveDept(fromFormatted, deptMap[id]);
-        // Let the brain open the chosen department naturally.
-        patientText = `(مریض نے مینو سے یہ سروس چنی ہے: ${deptMap[id]}) اس سروس کے بارے میں مدد چاہیے`;
+        // Let the brain open the chosen department naturally — in the
+        // patient's chosen language (English injection keeps replies English).
+        const selLang = getLang(fromFormatted) || "ur";
+        patientText = selLang === "en"
+          ? `(Patient selected this service from the menu: ${deptMap[id]}) I need help with this service.`
+          : `(مریض نے مینو سے یہ سروس چنی ہے: ${deptMap[id]}) اس سروس کے بارے میں مدد چاہیے`;
       } else {
         patientText = message.interactive?.list_reply?.title || message.interactive?.button_reply?.title || "";
       }
@@ -248,15 +264,9 @@ app.post("/webhook", async (req, res) => {
           return;
         }
       }
-      // Brand-new patient with a non-greeting message: ask language once, remember their question is coming next
-      if (!getLang(fromFormatted)) {
-        const hist0 = await loadConversation(fromFormatted);
-        if (!hist0 || hist0.length === 0) {
-          await sendLanguageSelect(from);
-          return;
-        }
-        await setLang(fromFormatted, "ur"); // legacy patients default to Urdu
-      }
+      // Content-ful first message: DON'T force language buttons — the brain
+      // auto-detects the patient's language (English vs Urdu/Roman Urdu)
+      // and reports it via META.lang; we persist it below.
     } else if (message.type === "image") {
       // Images flow into the AI so she can respond by CONTEXT:
       // medicine/prescription photo → refer to Pharmacy Manager;
@@ -417,8 +427,13 @@ app.post("/webhook", async (req, res) => {
       `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
       `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
     const activeDept = getActiveDept(fromFormatted);
-    const lang = getLang(fromFormatted) || "ur";
-    const langNote = lang === "en" ? "(زبان: English) " : "(زبان: اردو) ";
+    const storedLang = getLang(fromFormatted);
+    const lang = storedLang || "ur";
+    const langNote = !storedLang
+      ? "LANGUAGE NOT SET YET — Detect from the patient's message: English message → reply in simple professional English and set META lang:\"en\". Urdu or Roman Urdu message → reply in pure Urdu and set META lang:\"ur\". "
+      : lang === "en"
+      ? "LANGUAGE: ENGLISH ONLY — The patient chose English. EVERY word of your reply, every question, every template, every form field, every confirmation and farewell must be in simple professional English until the conversation ends. Translate any Urdu script/template into natural English. Never write Urdu. "
+      : "زبان: صرف اردو — مریض نے اردو چنی ہے۔ آخر تک ہر جواب، سوال، فارم اور پیغام خالص اردو میں۔ ";
     const deptNote = langNote + (activeDept
       ? `فعال شعبہ: ${activeDept} — صرف اسی شعبے کے اصول استعمال کریں، دوسرے شعبے نہ ملائیں۔ `
       : "");
@@ -455,6 +470,10 @@ app.post("/webhook", async (req, res) => {
     if (!safeReply) safeReply = "جی، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟ 🌸";
     await sendTextWithHome(from, safeReply, lang);
     console.log(`🤖 → ${from}: ${safeReply.slice(0, 60)}...`);
+    // Persist the language the brain detected/used (auto-detection + explicit switches).
+    if (meta.lang === "en" || meta.lang === "ur") {
+      if (meta.lang !== storedLang) await setLang(fromFormatted, meta.lang);
+    }
     // Keep the department state machine in sync with the brain's detection.
     if ((meta.department || "") !== activeDept) {
       await setActiveDept(fromFormatted, meta.department || "");
