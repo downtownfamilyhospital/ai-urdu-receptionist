@@ -8,8 +8,9 @@
 import { JSONFilePreset } from "lowdb/node";
 
 // Create / open the data file with starting structure.
-const db = await JSONFilePreset("hospital.json", { leads: [], messages: [], forwarded: [] });
+const db = await JSONFilePreset("hospital.json", { leads: [], messages: [], forwarded: [], deptState: {} });
 if (!db.data.forwarded) db.data.forwarded = []; // migrate older files
+if (!db.data.deptState) db.data.deptState = {}; // active department per patient
 
 function nowISO() {
   return new Date().toISOString();
@@ -140,4 +141,16 @@ export async function saveForwardedLead({ whatsapp_number, patient_name, departm
 // All forwarded leads, newest first (for the portal Leads tab).
 export function getForwardedLeads() {
   return [...db.data.forwarded].reverse();
+}
+
+
+// ===== V2: active-department state machine (per patient) =====
+export function getActiveDept(whatsapp_number) {
+  return db.data.deptState[normNum(whatsapp_number)] || "";
+}
+export async function setActiveDept(whatsapp_number, dept) {
+  const key = normNum(whatsapp_number);
+  const d = (dept || "").toLowerCase();
+  if (d) db.data.deptState[key] = d; else delete db.data.deptState[key];
+  await db.write();
 }

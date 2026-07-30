@@ -31,7 +31,7 @@ try {
 
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
-import { sendText } from "./whatsapp.js";
+import { sendText, sendTextWithHome, sendWelcomeMenu } from "./whatsapp.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
@@ -51,6 +51,8 @@ import {
   wasRecentlyForwarded,
   saveForwardedLead,
   getForwardedLeads,
+  getActiveDept,
+  setActiveDept,
 } from "./database.js";
 
 const app = express();
@@ -131,8 +133,39 @@ app.post("/webhook", async (req, res) => {
     let isImageMessage = false;
     let wasVoice = false;
 
-    if (message.type === "text") {
+    if (message.type === "interactive") {
+      const id = message.interactive?.list_reply?.id || message.interactive?.button_reply?.id || "";
+      if (id === "home") {
+        await setActiveDept(fromFormatted, "");
+        await sendWelcomeMenu(from);
+        return; // menu shown; wait for choice
+      }
+      const deptMap = { dept_online: "online", dept_pharmacy: "pharmacy", dept_nursing: "nursing", dept_lab: "lab", dept_aesthetic: "aesthetic" };
+      if (deptMap[id]) {
+        await setActiveDept(fromFormatted, deptMap[id]);
+        // Let the brain open the chosen department naturally.
+        patientText = `(مریض نے مینو سے یہ سروس چنی ہے: ${deptMap[id]}) اس سروس کے بارے میں مدد چاہیے`;
+      } else {
+        patientText = message.interactive?.list_reply?.title || message.interactive?.button_reply?.title || "";
+      }
+    } else if (message.type === "text") {
       patientText = message.text.body;
+      const lower0 = patientText.trim().toLowerCase();
+      // Typed Home also resets
+      if (["ہوم", "home", "🏠", "🏠 ہوم", "menu", "مینو"].includes(lower0)) {
+        await setActiveDept(fromFormatted, "");
+        await sendWelcomeMenu(from);
+        return;
+      }
+      // Pure greeting on a fresh conversation → intro + menu (deterministic welcome)
+      const greetings = ["hi","hello","hey","salam","aoa","assalamualaikum","assalam o alaikum","السلام علیکم","سلام","اسلام علیکم"];
+      if (greetings.includes(lower0.replace(/[!.،۔]/g, "").trim())) {
+        const hist0 = await loadConversation(fromFormatted);
+        if (!hist0 || hist0.length === 0) {
+          await sendWelcomeMenu(from);
+          return;
+        }
+      }
     } else if (message.type === "image") {
       // Images flow into the AI so she can respond by CONTEXT:
       // medicine/prescription photo → refer to Pharmacy Manager;
@@ -279,7 +312,11 @@ app.post("/webhook", async (req, res) => {
       `"کل/tomorrow" کا مطلب ${fmtDate(tomorrow)} (${isoDay(tomorrow)})۔ ` +
       `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
       `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
-    let brainInput = `(صرف آپ کی معلومات کے لیے — ${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
+    const activeDept = getActiveDept(fromFormatted);
+    const deptNote = activeDept
+      ? `فعال شعبہ: ${activeDept} — صرف اسی شعبے کے اصول استعمال کریں، دوسرے شعبے نہ ملائیں۔ `
+      : "";
+    let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (isVoiceNote) {
       brainInput =
         `(نوٹ: یہ مریض کا وائس میسج تھا جو ٹیکسٹ میں بدلا گیا۔ اگر اس میں مریض نے اپنا نام/نمبر/پتہ بتایا ہو تو نرمی سے تصدیق کر لیں کہ آپ نے ٹھیک سنا۔ اگر ایسی کوئی معلومات نہیں تھی تو تصدیق کا ذکر بالکل نہ کریں۔)\n\n` +
@@ -310,8 +347,12 @@ app.post("/webhook", async (req, res) => {
       .replace(/اردو[^۔\n]*معزرت[^۔\n]*۔?/g, "")
       .trim();
     if (!safeReply) safeReply = "جی، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟ 🌸";
-    await sendText(from, safeReply);
+    await sendTextWithHome(from, safeReply);
     console.log(`🤖 → ${from}: ${safeReply.slice(0, 60)}...`);
+    // Keep the department state machine in sync with the brain's detection.
+    if ((meta.department || "") !== activeDept) {
+      await setActiveDept(fromFormatted, meta.department || "");
+    }
 
     // 5. Save everything (after the reply is already on its way).
     saveMessage(from, "user", patientText);
@@ -362,7 +403,7 @@ app.post("/webhook", async (req, res) => {
       // within 24h). Each template message costs money.
       // "online" is a separate department but its leads go to the SAME
       // hospital (appointment) manager number.
-      const managerDept = dept === "online" ? "appointment" : dept;
+      const managerDept = (dept === "online" || dept === "nursing") ? "appointment" : dept;
       if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
@@ -601,7 +642,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
 .conv .row2{display:flex;justify-content:space-between;align-items:center;margin-top:3px;gap:6px}
 .conv .last{font-size:13px;color:#8696a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;direction:rtl;text-align:right;line-height:1.8}
 .badge{font-size:10px;padding:2px 8px;border-radius:10px;color:#fff;flex-shrink:0}
-.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-online{background:#7c4dff}.b-general{background:#6a7175}
+.b-pharmacy{background:#00a884}.b-lab{background:#2196f3}.b-aesthetic{background:#ff4da6}.b-appointment{background:#e53935}.b-online{background:#7c4dff}.b-nursing{background:#ff9800}.b-general{background:#6a7175}
 .needs{background:#ff5252;color:#fff;font-size:10px;padding:2px 8px;border-radius:10px;flex-shrink:0}
 .unread{background:#00a884;color:#fff;font-size:11px;font-weight:600;min-width:20px;height:20px;border-radius:10px;display:inline-flex;align-items:center;justify-content:center;padding:0 6px;flex-shrink:0}
 .empty{text-align:center;color:#8696a0;padding:40px 20px;font-size:14px}
@@ -654,7 +695,7 @@ body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;b
     <button class="chip" data-dept="lab">Lab</button>
     <button class="chip" data-dept="aesthetic">Aesthetic</button>
     <button class="chip" data-dept="appointment">Appointment</button>
-    <button class="chip" data-dept="online">Online Dr</button>
+    <button class="chip" data-dept="online">Online Dr</button>\n    <button class="chip" data-dept="nursing">Nursing</button>
   </div>
   <div class="list" id="list"><div class="empty">Loading...</div></div>
 </div>
