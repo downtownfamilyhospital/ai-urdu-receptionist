@@ -64,6 +64,17 @@ async function loadManagers() {
   return map;
 }
 
+// Manager WhatsApp numbers for one department (used by the weekly report).
+export async function getManagerNumbers(department) {
+  try {
+    const managers = await loadManagers();
+    return managers[(department || "").trim().toLowerCase()] || [];
+  } catch (e) {
+    console.error("getManagerNumbers error:", e.message);
+    return [];
+  }
+}
+
 // Send a lead summary to the right department manager(s) via template.
 export async function forwardLeadToManager(department, summary, patientNumber) {
   try {

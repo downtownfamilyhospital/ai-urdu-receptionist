@@ -61,7 +61,13 @@ import {
   getLang,
   setLang,
   bumpMenuCount,
+  getCollected,
+  mergeCollected,
+  clearCollected,
+  getLastWeeklyReport,
+  setLastWeeklyReport,
 } from "./database.js";
+import { runWeeklyAnalysis, sendWeeklyReport } from "./weekly-analysis.js";
 
 const app = express();
 app.use(express.json());
@@ -383,6 +389,7 @@ app.post("/webhook", async (req, res) => {
     if (idleMin !== null && idleMin > 30 && !isImageMessage) {
       await setActiveDept(fromFormatted, "");
       try { await clearConversation(fromFormatted); } catch (e) {}
+      await clearCollected(fromFormatted); // fresh session — no old personal data
       sessionReset = true;
       console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
     }
@@ -441,7 +448,22 @@ app.post("/webhook", async (req, res) => {
     const deptNote = langNote + (activeDept
       ? `فعال شعبہ: ${activeDept} — صرف اسی شعبے کے اصول استعمال کریں، دوسرے شعبے نہ ملائیں۔ `
       : "");
-    let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
+    // FIX (never re-ask): inject whatever was already captured in this
+    // workflow, so the bot can never ask for the name/number/etc. twice —
+    // even if the original answer rolled out of the history window.
+    const collected = getCollected(fromFormatted);
+    let collectedNote = "";
+    if (collected) {
+      const parts = [];
+      if (collected.patient_name) parts.push(`نام: ${collected.patient_name}`);
+      if (collected.contact_number) parts.push(`نمبر: ${collected.contact_number}`);
+      if (collected.address) parts.push(`پتہ: ${collected.address}`);
+      if (collected.medical_issue) parts.push(`طبی مسئلہ: ${collected.medical_issue}`);
+      if (parts.length) {
+        collectedNote = `پہلے سے موصول معلومات (دوبارہ کبھی نہ پوچھیں، خاموشی سے استعمال کریں): ${parts.join("، ")}۔ `;
+      }
+    }
+    let brainInput = `(صرف آپ کی معلومات کے لیے — ${deptNote}${collectedNote}${dateHelp} اسے جواب میں مت لکھیں جب تک پوچھا نہ جائے۔)\n\n${patientText}`;
     if (isVoiceNote) {
       brainInput =
         `(نوٹ: یہ مریض کا وائس میسج تھا جو ٹیکسٹ میں بدلا گیا۔ اگر اس میں مریض نے اپنا نام/نمبر/پتہ بتایا ہو تو نرمی سے تصدیق کر لیں کہ آپ نے ٹھیک سنا۔ اگر ایسی کوئی معلومات نہیں تھی تو تصدیق کا ذکر بالکل نہ کریں۔)\n\n` +
@@ -505,6 +527,8 @@ app.post("/webhook", async (req, res) => {
     if ((meta.department || "") !== activeDept) {
       await setActiveDept(fromFormatted, meta.department || "");
     }
+    // Remember every field the brain extracted this turn (never re-ask fix).
+    await mergeCollected(fromFormatted, meta);
     // Rules 3-5: brain requested the menu (service selection / return home).
     if (meta.show_menu) {
       await setActiveDept(fromFormatted, "");
@@ -571,7 +595,23 @@ app.post("/webhook", async (req, res) => {
           : "";
         const chatDigits = fromFormatted.replace(/[^0-9]/g, "");
         const contactFinal = normGiven || chatDigits;
-        let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}\nWhatsApp: +${contactFinal}`;
+        // Fill any gaps from the captured-fields store (survives history rollover).
+        const col = getCollected(fromFormatted) || {};
+        const nameFinal = ((meta.patient_name || col.patient_name || "").trim()) || "-";
+        const issueFinal = ((meta.medical_issue || col.medical_issue || "").trim()) || "-";
+        let fullSummary;
+        if (dept === "online") {
+          // Required format for online doctor consultation leads:
+          fullSummary =
+            `🩺 ONLINE DR CONSULTATION LEAD\n` +
+            `Name: ${nameFinal}\n` +
+            `WhatsApp No: +${contactFinal}\n` +
+            `Medical Issue: ${issueFinal}\n` +
+            `Screenshot uploaded: Yes\n` +
+            `(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
+        } else {
+          fullSummary = `${meta.lead_summary}\nPatient name: ${nameFinal}\nWhatsApp: +${contactFinal}`;
+        }
         await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
         await saveForwardedLead({
           whatsapp_number: fromFormatted,
@@ -589,6 +629,8 @@ app.post("/webhook", async (req, res) => {
       // (bot re-asked name/age after the payment screenshot). The patient's
       // next message still has full context; questionnaire never reopens.
       await setActiveDept(fromFormatted, "");
+      // Lead delivered → personal data no longer needed (privacy rule).
+      await clearCollected(fromFormatted);
     }
   } catch (err) {
     console.error("Webhook error:", err);
@@ -1078,6 +1120,30 @@ app.post("/portal/campaign/send", async (req, res) => {
   </div></body></html>`);
 });
 
+// ---- Weekly report: manual trigger for testing (login-protected) ----
+// Visit /portal/weekly to run the analysis NOW, see it, and send it to
+// the hospital manager's WhatsApp.
+app.get("/portal/weekly", async (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage());
+  try {
+    const report = await runWeeklyAnalysis();
+    const sent = await sendWeeklyReport(report);
+    await setLastWeeklyReport(new Date().toISOString());
+    res.send(`<!doctype html><html><head><meta charset="utf-8"><title>Weekly Report</title>
+    <style>body{font-family:system-ui,Arial;margin:0;background:#f6f7f9}
+    .wrap{max-width:640px;margin:40px auto;background:#fff;padding:26px;border-radius:12px;box-shadow:0 1px 4px #0001}
+    pre{white-space:pre-wrap;background:#f2f4f7;padding:14px;border-radius:8px;font-size:14px}
+    a{color:#0d6efd}</style></head><body><div class="wrap">
+    <h2>📊 Weekly Bot Report</h2>
+    <p>${sent ? "✅ Sent to hospital manager WhatsApp." : "⚠️ Could not send — check Managers sheet ('appointment' row) and logs."}</p>
+    <pre>${report.replace(/</g, "&lt;")}</pre>
+    <p><a href="/portal">← Back to portal</a></p></div></body></html>`);
+  } catch (e) {
+    console.error("weekly report error:", e.message);
+    res.status(500).send("Weekly report failed: " + e.message);
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 
@@ -1085,6 +1151,25 @@ app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
 setInterval(() => {
   cleanupExpired().catch((e) => console.error("cleanup error:", e.message));
 }, 60 * 60 * 1000);
+
+// Every 30 minutes: is it Monday 9-10 AM Pakistan time and we haven't
+// sent this week's report yet? Then run the weekly conversation analysis
+// and WhatsApp it to the hospital manager.
+setInterval(async () => {
+  try {
+    const pk = new Date(new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi" }));
+    if (pk.getDay() !== 1 || pk.getHours() !== 9) return; // Monday, 9 AM hour only
+    const last = getLastWeeklyReport();
+    if (last && Date.now() - new Date(last).getTime() < 6 * 24 * 60 * 60 * 1000) return; // already sent this week
+    console.log("📊 Running weekly conversation analysis...");
+    const report = await runWeeklyAnalysis();
+    await sendWeeklyReport(report);
+    await setLastWeeklyReport(new Date().toISOString());
+    console.log("📊 Weekly report done.");
+  } catch (e) {
+    console.error("weekly analysis error:", e.message);
+  }
+}, 30 * 60 * 1000);
 
 // Every 15 minutes, check for appointments ~3h away and send reminders.
 setInterval(() => {

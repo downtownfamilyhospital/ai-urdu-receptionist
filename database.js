@@ -14,6 +14,8 @@ if (!db.data.deptState) db.data.deptState = {}; // active department per patient
 if (!db.data.lastSeen) db.data.lastSeen = {}; // last activity per patient (5-min session reset)
 if (!db.data.langState) db.data.langState = {}; // "ur" | "en" per patient
 if (!db.data.menuCount) db.data.menuCount = {}; // how many times home menu shown (welcome variants)
+if (!db.data.collected) db.data.collected = {}; // captured booking fields per patient (never re-ask)
+if (!db.data.lastWeeklyReport) db.data.lastWeeklyReport = ""; // ISO time of last weekly analysis
 
 function nowISO() {
   return new Date().toISOString();
@@ -186,4 +188,53 @@ export async function bumpMenuCount(whatsapp_number) {
   db.data.menuCount[k] = (db.data.menuCount[k] || 0) + 1;
   await db.write();
   return db.data.menuCount[k];
+}
+
+
+// ===== V3: captured booking fields (fix: never re-ask name/number/etc.) =====
+// Whatever the AI extracts (name, number, address, medical issue) is kept
+// here for the ACTIVE workflow and injected back into every prompt, so the
+// bot can never ask for the same thing twice — even if the chat history
+// window has rolled past the original answer. Cleared on session reset and
+// after a lead is forwarded (no permanent personal storage).
+export function getCollected(whatsapp_number) {
+  return db.data.collected[normNum(whatsapp_number)] || null;
+}
+export async function mergeCollected(whatsapp_number, fields) {
+  const k = normNum(whatsapp_number);
+  const cur = db.data.collected[k] || {};
+  let changed = false;
+  for (const f of ["patient_name", "contact_number", "address", "medical_issue"]) {
+    const v = (fields?.[f] || "").toString().trim();
+    // keep the first real value; ignore empties and placeholder dashes
+    if (v && v !== "-" && v !== "..." && !cur[f]) { cur[f] = v; changed = true; }
+  }
+  if (changed) {
+    cur.updated_at = nowISO();
+    db.data.collected[k] = cur;
+    await db.write();
+  }
+}
+export async function clearCollected(whatsapp_number) {
+  const k = normNum(whatsapp_number);
+  if (db.data.collected[k]) { delete db.data.collected[k]; await db.write(); }
+}
+
+
+// ===== V3: weekly analysis helpers =====
+// All messages from the last N days (for the weekly conversation analysis).
+export function getMessagesSince(days = 7) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return db.data.messages.filter((m) => new Date(m.created_at).getTime() > cutoff);
+}
+export function getForwardedSince(days = 7) {
+  const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+  return db.data.forwarded.filter((f) => new Date(f.created_at).getTime() > cutoff);
+}
+export function getLastWeeklyReport() {
+  return db.data.lastWeeklyReport || "";
+}
+export async function setLastWeeklyReport(iso) {
+  db.data.lastWeeklyReport = iso;
+  await db.write();
 }
