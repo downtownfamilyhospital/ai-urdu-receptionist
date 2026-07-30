@@ -80,9 +80,20 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
   try {
     const managers = await loadManagers();
     const dept = (department || "").trim().toLowerCase();
-    const numbers = managers[dept] || [];
+    let numbers = managers[dept] || [];
+    // A LEAD MUST NEVER BE LOST. If the Managers sheet has no row for this
+    // department, fall back to the hospital manager ("appointment"), and as
+    // a last resort to ANY manager number in the sheet.
+    if (numbers.length === 0 && dept !== "appointment") {
+      numbers = managers["appointment"] || [];
+      if (numbers.length) console.log(`⚠️ No manager for "${dept}" in Managers sheet — sending to hospital manager instead`);
+    }
     if (numbers.length === 0) {
-      console.log(`⚠️ No manager number found for department "${dept}"`);
+      numbers = [...new Set(Object.values(managers).flat())];
+      if (numbers.length) console.log(`⚠️ No "${dept}"/"appointment" manager row — sending to first available manager(s)`);
+    }
+    if (numbers.length === 0) {
+      console.error(`❌ LEAD NOT DELIVERED: Managers sheet has NO numbers at all. Add rows: department | manager_name | whatsapp_number`);
       return;
     }
 

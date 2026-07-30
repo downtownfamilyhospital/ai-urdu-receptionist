@@ -217,9 +217,10 @@ app.post("/webhook", async (req, res) => {
       }
       if (id === "home") {
         await setActiveDept(fromFormatted, "");
-        const v = await bumpMenuCount(fromFormatted);
-        await sendWelcomeMenu(from, getLang(fromFormatted) || "ur", v);
-        return; // menu shown; wait for choice
+        // Back to home → always let the patient pick the language again;
+        // the welcome menu follows after they choose (lang_ur / lang_en).
+        await sendLanguageSelect(from);
+        return; // language choice shown; menu follows
       }
       const deptMap = { dept_appointment: "appointment", dept_online: "online", dept_pharmacy: "pharmacy", dept_nursing: "nursing", dept_lab: "lab", dept_aesthetic: "aesthetic", dept_physio: "physio" };
       if (id === "dept_aesthetic") {
@@ -251,8 +252,8 @@ app.post("/webhook", async (req, res) => {
       // Typed Home also resets
       if (["ہوم", "home", "🏠", "🏠 ہوم", "🏠 home", "menu", "مینو"].includes(lower0)) {
         await setActiveDept(fromFormatted, "");
-        const v = await bumpMenuCount(fromFormatted);
-        await sendWelcomeMenu(from, getLang(fromFormatted) || "ur", v);
+        // Back to home → language choice first, then the menu.
+        await sendLanguageSelect(from);
         return;
       }
       // Language switch by typing
@@ -459,6 +460,7 @@ app.post("/webhook", async (req, res) => {
       if (collected.contact_number) parts.push(`نمبر: ${collected.contact_number}`);
       if (collected.address) parts.push(`پتہ: ${collected.address}`);
       if (collected.medical_issue) parts.push(`طبی مسئلہ: ${collected.medical_issue}`);
+      if (collected.visit_at) parts.push(`طے شدہ وقت: ${collected.visit_at}`);
       if (parts.length) {
         collectedNote = `پہلے سے موصول معلومات (دوبارہ کبھی نہ پوچھیں، خاموشی سے استعمال کریں): ${parts.join("، ")}۔ `;
       }
@@ -498,6 +500,8 @@ app.post("/webhook", async (req, res) => {
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
 
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
+    // Always-visible lead diagnostics (watch these in Railway logs):
+    console.log(`🧠 META: dept=${meta.department || "-"} | lead_complete=${meta.lead_complete} | name=${meta.patient_name || "-"} | issue=${(meta.medical_issue || "-").slice(0, 40)} | lang=${meta.lang || "-"}`);
 
     // If this is a sales/marketing pitch, stay silent (no reply, no saves).
     if (meta.stay_silent) {
@@ -559,15 +563,18 @@ app.post("/webhook", async (req, res) => {
     // Online-consultation screenshot leads forward even without a name —
     // payment is the critical event; team completes details by call.
     const isOnlinePaid = (meta.department || "").toLowerCase() === "online";
-    const hasName = (meta.patient_name || "").trim().length > 1 || isOnlinePaid;
+    // Name gate: also accept the name from the captured-fields store, so a
+    // lead is never blocked just because META missed the name this turn.
+    const colGate = getCollected(fromFormatted) || {};
+    const hasName = ((meta.patient_name || colGate.patient_name || "").trim().length > 1) || isOnlinePaid;
     const hasNumber = (meta.contact_number || fromFormatted || "").replace(/[^0-9]/g, "").length >= 11;
     // NEW WORKFLOW: pharmacy never creates leads — always a direct referral
     // to the Pharmacy Manager. Hard-block any pharmacy forward.
     if (meta.lead_complete && ["pharmacy", "appointment"].includes((meta.department || "").toLowerCase())) {
       console.log(`🚫 ${meta.department} lead blocked (referral-only workflow)`);
-    } else if (meta.lead_complete && meta.lead_summary && (!hasName || !hasNumber)) {
+    } else if (meta.lead_complete && (!hasName || !hasNumber)) {
       console.log(`⏸️ Lead marked complete but missing ${!hasName ? "name" : "number"} — not forwarding yet`);
-    } else if (meta.lead_complete && meta.lead_summary) {
+    } else if (meta.lead_complete) {
       const dept = meta.department || "general";
       console.log("==================================================");
       console.log(`✅ LEAD COMPLETE → department: ${dept}`);
@@ -582,7 +589,7 @@ app.post("/webhook", async (req, res) => {
       // hospital (appointment) manager number.
       // Per latest workflow: online, nursing AND lab leads all go to the Hospital Manager.
       const managerDept = (dept === "online" || dept === "nursing" || dept === "lab" || dept === "physio") ? "appointment" : dept;
-      if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
+      if (wasRecentlyForwarded(fromFormatted, dept, 6)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
         // Meta-approved uniform number: patient-provided number normalized to
@@ -610,7 +617,11 @@ app.post("/webhook", async (req, res) => {
             `Screenshot uploaded: Yes\n` +
             `(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
         } else {
-          fullSummary = `${meta.lead_summary}\nPatient name: ${nameFinal}\nWhatsApp: +${contactFinal}`;
+          // If the brain forgot the summary, synthesize one — never lose a lead.
+          const summaryBase =
+            (meta.lead_summary || "").trim() ||
+            `${dept.toUpperCase()} LEAD — Issue: ${issueFinal}${col.address ? `, Address: ${col.address}` : ""}`;
+          fullSummary = `${summaryBase}\nPatient name: ${nameFinal}\nWhatsApp: +${contactFinal}\n(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
         }
         await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
         await saveForwardedLead({

@@ -59,7 +59,7 @@ export async function saveMessage(whatsapp_number, role, content) {
 }
 
 // Get the last few messages so the AI remembers the conversation.
-export function getRecentHistory(whatsapp_number, limit = 6) {
+export function getRecentHistory(whatsapp_number, limit = 12) {
   const key = normNum(whatsapp_number);
   const all = db.data.messages.filter((m) => normNum(m.whatsapp_number) === key);
   return all.slice(-limit).map((m) => ({ role: m.role, content: m.content }));
@@ -204,7 +204,7 @@ export async function mergeCollected(whatsapp_number, fields) {
   const k = normNum(whatsapp_number);
   const cur = db.data.collected[k] || {};
   let changed = false;
-  for (const f of ["patient_name", "contact_number", "address", "medical_issue"]) {
+  for (const f of ["patient_name", "contact_number", "address", "medical_issue", "visit_at"]) {
     const v = (fields?.[f] || "").toString().trim();
     // keep the first real value; ignore empties and placeholder dashes
     if (v && v !== "-" && v !== "..." && !cur[f]) { cur[f] = v; changed = true; }

@@ -12,7 +12,7 @@ import { GoogleSpreadsheet } from "google-spreadsheet";
 import { JWT } from "google-auth-library";
 
 const TAB = "Conversations";
-const MAX_MESSAGES = 15;          // keep only the last N messages per patient
+const MAX_MESSAGES = 24;          // keep only the last N messages per patient
 const EXPIRY_HOURS = 12;          // forget after this many hours of inactivity
 
 function getAuth() {
