@@ -31,6 +31,20 @@ async function downloadWhatsAppAudio(mediaId) {
   return Buffer.from(audio.data);
 }
 
+// Speech-to-text models to try, in order. The OpenAI project may have a
+// model ALLOW-LIST (Limits → Model usage) — if one model is blocked
+// (403 / model_not_found), we automatically try the next one and remember
+// which one worked so future voice notes transcribe on the first try.
+// Override order with OPENAI_TRANSCRIBE_MODEL if needed.
+const TRANSCRIBE_MODELS = [
+  process.env.OPENAI_TRANSCRIBE_MODEL,
+  "whisper-1",
+  "gpt-4o-mini-transcribe",
+  "gpt-4o-transcribe",
+].filter(Boolean);
+
+let workingModel = null; // remembered after the first success
+
 // Step 2+3: Turn a patient's voice note (media id) into text.
 export async function transcribeVoice(mediaId) {
   // Download the audio from WhatsApp
@@ -39,13 +53,40 @@ export async function transcribeVoice(mediaId) {
   // WhatsApp voice notes are .ogg (opus) files
   const file = await toFile(audioBuffer, "voice.ogg");
 
-  // Send to Whisper. We hint Urdu, but Whisper also handles
-  // Roman Urdu / mixed speech well.
-  const result = await openai.audio.transcriptions.create({
-    file,
-    model: "whisper-1",
-    language: "ur", // Urdu hint; remove if you want pure auto-detect
-  });
+  const candidates = workingModel
+    ? [workingModel, ...TRANSCRIBE_MODELS.filter((m) => m !== workingModel)]
+    : TRANSCRIBE_MODELS;
 
-  return result.text || "";
+  let lastErr;
+  for (const model of candidates) {
+    try {
+      // We hint Urdu; these models also handle Roman Urdu / mixed speech well.
+      const result = await openai.audio.transcriptions.create({
+        file,
+        model,
+        language: "ur",
+      });
+      if (model !== workingModel) {
+        workingModel = model;
+        console.log(`🎙️ Voice transcription using model: ${model}`);
+      }
+      return result.text || "";
+    } catch (e) {
+      lastErr = e;
+      const msg = e?.error?.message || e?.message || "";
+      const blocked =
+        e?.status === 403 || e?.status === 404 ||
+        /model_not_found|does not have access|invalid model|not supported/i.test(msg);
+      if (blocked) {
+        console.warn(`🎙️ Transcription model "${model}" not available (${msg.slice(0, 100)}) — trying next`);
+        continue; // try the next model in the chain
+      }
+      throw e; // network/audio error — no point trying other models
+    }
+  }
+  console.error(
+    "❌ ALL transcription models blocked for this OpenAI project. " +
+    "Fix: platform.openai.com → Settings → your project → Limits → Model usage → allow 'whisper-1' (or gpt-4o-mini-transcribe)."
+  );
+  throw lastErr;
 }
