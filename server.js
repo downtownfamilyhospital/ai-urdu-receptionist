@@ -121,9 +121,10 @@ app.post("/chat/api/message", async (req, res) => {
       if (num.length >= 10) {
         const managerDept = (dept === "online" || dept === "nursing" || dept === "lab" || dept === "physio") ? "appointment" : dept;
         const key = "+92" + num.replace(/^0/, "").replace(/^92/, "");
-        if (!wasRecentlyForwarded(key, dept, 24)) {
-          await forwardLeadToManager(managerDept, `${meta.lead_summary}\nPatient name: ${meta.patient_name}\n(Source: Website chat)`, key);
-          await saveForwardedLead({ whatsapp_number: key, patient_name: meta.patient_name, department: dept, summary: meta.lead_summary });
+        if (!wasRecentlyForwarded(key, dept, 6)) {
+          const deliveredWeb = await forwardLeadToManager(managerDept, `${meta.lead_summary}\nPatient name: ${meta.patient_name}\n(Please check, confirm and call the patient on WhatsApp within 10 minutes)\n(Source: Website chat)`, key);
+          if (deliveredWeb) await saveForwardedLead({ whatsapp_number: key, patient_name: meta.patient_name, department: dept, summary: meta.lead_summary });
+          else console.error(`❌ WEB LEAD SEND FAILED (${dept}) — not marked as forwarded`);
         }
       }
     }
@@ -623,13 +624,19 @@ app.post("/webhook", async (req, res) => {
             `${dept.toUpperCase()} LEAD — Issue: ${issueFinal}${col.address ? `, Address: ${col.address}` : ""}`;
           fullSummary = `${summaryBase}\nPatient name: ${nameFinal}\nWhatsApp: +${contactFinal}\n(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
         }
-        await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
-        await saveForwardedLead({
-          whatsapp_number: fromFormatted,
-          patient_name: meta.patient_name,
-          department: dept,
-          summary: meta.lead_summary,
-        });
+        const delivered = await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
+        if (delivered) {
+          await saveForwardedLead({
+            whatsapp_number: fromFormatted,
+            patient_name: meta.patient_name,
+            department: dept,
+            summary: meta.lead_summary,
+          });
+        } else {
+          // DO NOT record it as forwarded — otherwise the duplicate-check
+          // would silently block every retry for hours after one failure.
+          console.error(`❌ LEAD SEND FAILED (${dept}) — not marked as forwarded; will retry on the next trigger`);
+        }
       }
       // Schedule a 1-hour-before reminder if a visit time was captured.
       if (meta.visit_at) {
@@ -642,6 +649,41 @@ app.post("/webhook", async (req, res) => {
       await setActiveDept(fromFormatted, "");
       // Lead delivered → personal data no longer needed (privacy rule).
       await clearCollected(fromFormatted);
+    }
+
+    // ===== BULLETPROOF ONLINE LEAD (server-side guarantee) =====
+    // If the patient sends an IMAGE in the online-consultation department
+    // AFTER payment was requested (the bank account number appears in an
+    // earlier bot message), that image IS the payment screenshot. Forward
+    // the lead even if the AI forgot to set lead_complete — the online
+    // lead must NEVER depend on the model alone.
+    if (!meta.lead_complete && isImageMessage && activeDept === "online") {
+      const paymentRequested = (history || []).some(
+        (h) => h && h.role === "assistant" && (h.content || "").includes("305115802640001")
+      );
+      if (paymentRequested && !wasRecentlyForwarded(fromFormatted, "online", 6)) {
+        const colB = getCollected(fromFormatted) || {};
+        const digitsB = fromFormatted.replace(/[^0-9]/g, "");
+        const forcedSummary =
+          `🩺 ONLINE DR CONSULTATION LEAD\n` +
+          `Name: ${colB.patient_name || meta.patient_name || "-"}\n` +
+          `WhatsApp No: +${digitsB}\n` +
+          `Medical Issue: ${colB.medical_issue || meta.medical_issue || "-"}\n` +
+          `Screenshot uploaded: Yes\n` +
+          `(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
+        console.log("🛡️ Forced online lead — screenshot detected, AI missed lead_complete");
+        const okForced = await forwardLeadToManager("appointment", forcedSummary, fromFormatted);
+        if (okForced) {
+          await saveForwardedLead({
+            whatsapp_number: fromFormatted,
+            patient_name: colB.patient_name || meta.patient_name || "",
+            department: "online",
+            summary: "ONLINE — payment screenshot received (forced server-side)",
+          });
+          await setActiveDept(fromFormatted, "");
+          await clearCollected(fromFormatted);
+        }
+      }
     }
   } catch (err) {
     console.error("Webhook error:", err);

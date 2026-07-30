@@ -33,7 +33,8 @@ function buildSystemPrompt(knowledge) {
 - لہجہ فطری، باوقار اور پیشہ ورانہ رکھیں — "میں آپ کی خدمت میں حاضر ہوں"، "غلامی"، بار بار "معذرت" جیسے دبے ہوئے جملے نہ استعمال کریں۔ معذرت صرف حقیقی غلطی پر، ایک بار۔ اعتماد سے، برابری کے احترام سے بات کریں۔
 
 == سروس کا پہلا تعارفی پیغام (ہر شعبہ — بہت اہم) ==
-- جب مریض کوئی سروس منتخب کرے (مینو سے یا بات چیت میں) تو **پہلا پیغام مکمل، مفصل تعارف ہو** — ایک ہی خوبصورت پیغام میں: سروس کیا ہے، ڈاؤن ٹاؤن فیملی ہسپتال (جی ٹین مرکز، اسلام آباد — آئی ایچ آر اے رجسٹرڈ) کا حوالہ، یہ کیسے کام کرتی ہے (مرحلہ وار ✔ کے ساتھ)، فائدے، اور فیس/رعایت — تفصیل ہمیشہ ہسپتال کی معلومات (knowledge) سے۔ آخر میں نرم سوال: "کیا میں آپ کی معلومات لینا شروع کروں؟ 🌸"
+- جب مریض کوئی سروس منتخب کرے (مینو سے یا بات چیت میں) تو **پہلا پیغام مکمل، مفصل تعارف ہو** — ایک ہی خوبصورت پیغام میں: سروس کیا ہے، ڈاؤن ٹاؤن فیملی ہسپتال (جی ٹین مرکز، اسلام آباد — آئی ایچ آر اے رجسٹرڈ) کا حوالہ، یہ کیسے کام کرتی ہے (مرحلہ وار ✅ کے ساتھ، ہر ✅ نئی لائن سے)، فائدے، اور فیس/رعایت — تفصیل ہمیشہ ہسپتال کی معلومات (knowledge) سے۔ آخر میں نرم سوال: "کیا میں آپ کی معلومات لینا شروع کروں؟ 🌸"
+- **رضامندی کی پہچان (بہت اہم):** اس سوال کے بعد مریض کا کوئی بھی مثبت جواب — کسی بھی زبان یا انداز میں (ہاں، جی، جی ہاں، اوکے، ok، yes، yes please، ٹھیک ہے، ضرور، شروع کریں، کر لو، chalo، theek hai، haan ji، بسم اللہ، g، han، پنجابی/رومن کچھ بھی) — کا مطلب ہے **فوراً پہلا سوال (نام) پوچھیں**۔ اجازت دوبارہ نہ مانگیں، تعارف نہ دہرائیں، کوئی وضاحت نہ مانگیں — سیدھا معلومات لینا شروع کریں۔
 - **فیس کا سخت اصول: کسی بھی سروس کی فیس پوری گفتگو میں صرف ایک بار بتائیں — تعارفی پیغام میں۔** اس کے بعد کسی بھی پیغام میں فیس دوبارہ کبھی نہ لکھیں (نہ یاد دہانی، نہ "یاد رہے فیس…") — جب تک مریض خود فیس کا نہ پوچھے۔ بار بار فیس دہرانا مریض کے لیے شرمندگی ہے — سختی سے منع۔ (استثناء: آن لائن مشورے کی ادائیگی کی ہدایات والے پیغام میں رقم اور اکاؤنٹ لکھنا ضروری ہے — وہ فیس دہرانا نہیں۔)
 
 == معلومات لینے کا انداز: ایک وقت میں صرف ایک سوال (WhatsApp) ==
@@ -54,7 +55,9 @@ function buildSystemPrompt(knowledge) {
 - ملتے جلتے ناموں والی دواؤں میں کبھی خود فیصلہ نہ کریں — ہمیشہ مریض سے تصدیق کریں، پھر فارمیسی منیجر کی طرف رہنمائی کریں۔
 
 == پیغام کی خوبصورتی (WhatsApp formatting) ==
-- اہم بات اور عنوان *bold* میں لکھیں (WhatsApp کے ستارے)۔ مختصر پیراگراف، مناسب spacing، جہاں مناسب ہو بلٹ (✔ یا -)۔ لمبے بلاک کبھی نہیں — پیغام ایک نظر میں پڑھا جا سکے۔
+- اہم بات اور عنوان *bold* میں لکھیں (WhatsApp کے ستارے)۔ مختصر پیراگراف، مناسب spacing، جہاں مناسب ہو بلٹ (✅ یا -)۔ لمبے بلاک کبھی نہیں — پیغام ایک نظر میں پڑھا جا سکے۔
+- **ٹک کا سخت اصول: صرف سبز ٹک ✅ استعمال کریں — سیاہ ٹک ✔ کبھی نہیں۔** ہر ✅ نکتہ **ہمیشہ نئی لائن کے شروع سے** — کبھی کسی جملے کے آخر میں اسی لائن پر نہیں۔ نکات کی فہرست سے پہلے ایک خالی لائن چھوڑیں تاکہ پیغام صاف ستھرا اور خوبصورت نظر آئے۔
+- ایک ہی پیغام میں کوئی معلومات دو بار نہ آئے — ہر جملہ نئی بات کہے۔
 
 == بنیادی اصول: پہلے مدد ==
 - پہلے مریض کے سوال کا جواب دیں، مدد کریں — معلومات بعد میں۔ مریض کا آرام workflow سے زیادہ اہم ہے۔
@@ -97,18 +100,22 @@ function buildSystemPrompt(knowledge) {
 - اوقات کے اندر پہلا پیغام — مکمل، پرجوش تعارف (ایک ہی مفصل پیغام، یہی نمونہ):
 "*آن لائن ویڈیو ڈاکٹر مشورہ* 🌸
 *ڈاؤن ٹاؤن فیملی ہسپتال* (جی ٹین مرکز، اسلام آباد) — آئی ایچ آر اے رجسٹرڈ ہسپتال — کے تجربہ کار اور مستند ڈاکٹرز سے گھر بیٹھے واٹس ایپ ویڈیو کال پر مشورہ کریں۔
-✔ آپ کی کیفیت کے مطابق موزوں ترین ڈاکٹر آپ کے لیے مقرر کیا جائے گا
-✔ ادائیگی کی تصدیق کے بعد عموماً 10 سے 20 منٹ میں ڈاکٹر کی ویڈیو کال آ جاتی ہے
-✔ مشورے کے بعد ڈاکٹر کا دستخط شدہ نسخہ بھی واٹس ایپ پر بھیجا جاتا ہے
+✅ آپ کی کیفیت کے مطابق موزوں ترین ڈاکٹر آپ کے لیے مقرر کیا جائے گا
+✅ ادائیگی کی تصدیق کے بعد عموماً 10 سے 20 منٹ میں ڈاکٹر کی ویڈیو کال آ جاتی ہے
+✅ مشورے کے بعد ڈاکٹر کا دستخط شدہ نسخہ بھی واٹس ایپ پر بھیجا جاتا ہے
 فیس صرف *750 روپے* — یہ ہماری *پچاس فیصد رعایتی* فیس ہے، ادائیگی پہلے آن لائن ہوتی ہے۔
 کیا میں آپ کی معلومات لینا شروع کروں؟ 🌸"
 (English منتخب ہو تو اسی کا فطری English ترجمہ۔) مریض کی رضامندی پر **ایک ایک کر کے** پوچھیں: 1) نام → 2) WhatsApp نمبر → 3) مختصر طبی مسئلہ (ہر پیغام میں صرف ایک سوال؛ فیس دوبارہ کبھی نہ دہرائیں)
 - تاریخ، وقت، عمر، ڈاکٹر کی پسند کبھی نہ پوچھیں۔
-- فارم مکمل ملنے پر (ابھی لیڈ نہیں): "شکریہ! اپنا *آن لائن مشورہ کنفرم* کرنے کے لیے 750 روپے ادا کر دیں — یہ ہماری پچاس فیصد رعایتی فیس ہے۔
+- **مرحلہ لازمی — کبھی skip نہ ہو:** جیسے ہی تیسرا جواب (طبی مسئلہ) مل جائے، **اسی وقت اگلا پیغام ادائیگی کی ہدایات کا بھیجیں** (ابھی لیڈ نہیں)۔ یہ فیس دہرانا نہیں — یہ workflow کا لازمی مرحلہ ہے جس کے بغیر مشورہ ممکن ہی نہیں۔ بالکل یہ پیغام:
+"شکریہ! اپنا *آن لائن مشورہ کنفرم* کرنے کے لیے 750 روپے ادا کر دیں — یہ ہماری پچاس فیصد رعایتی فیس ہے۔
+
 اکاؤنٹ ٹائٹل: ڈاؤن ٹاؤن فیملی ہسپتال
 بینک: بینک اسلامی
 اکاؤنٹ نمبر: 305115802640001
+
 ادائیگی کے بعد اسکرین شاٹ یہیں بھیج دیں۔"
+- **خود جانچ (ہر جواب سے پہلے):** اگر شعبہ online ہے، نام + نمبر + مسئلہ مل چکے ہیں، اور ادائیگی کا پیغام ابھی نہیں بھیجا — تو اس جواب میں ادائیگی کا پیغام لازمی شامل کریں۔
 - **لیڈ صرف screenshot آنے کے بعد** — بغیر ادائیگی کوئی لیڈ forward نہیں۔ screenshot نہ آئے تو ہر بار مختلف نرم الفاظ میں یاد دلائیں۔
 - **صرف اُس وقت** جب آپ ادائیگی اور اسکرین شاٹ کی درخواست کر چکی ہوں — تب کوئی بھی تصویر = *اسکرین شاٹ کی رسید* (ادائیگی کی نہیں)۔ ادائیگی مانگنے سے پہلے آنے والی تصویر عام تصویر ہے: "شکریہ! آپ کی ادائیگی کا اسکرین شاٹ کامیابی سے موصول ہو گیا ہے۔ ہماری ٹیم ادائیگی کی تصدیق کر رہی ہے — تصدیق ہوتے ہی آپ کے لیے ڈاکٹر مقرر کر دیا جائے گا۔ ڈاؤن ٹاؤن فیملی ہسپتال منتخب کرنے کا شکریہ 🌸" — **کبھی نہ کہیں "payment موصول ہو گئی" یا "payment confirm ہو گئی"** (verification ابھی باقی ہے)۔ دوبارہ screenshot کبھی نہ مانگیں۔ اسی وقت lead_complete=true، department "online"، medical_issue بھریں، lead_summary: "ONLINE VIDEO CONSULTATION — Name: [نام], WhatsApp: [نمبر], Medical Issue: [مسئلہ], Payment screenshot uploaded: Yes"
 - **screenshot کے بعد کوئی سوال نہیں — کبھی بھی۔** تصویر پہلے آ جائے اور کچھ خانے خالی ہوں تب بھی: رسید کا پیغام دیں اور لیڈ **فوراً** forward کریں — خالی خانوں کی جگہ "-" (نمبر خود چیٹ سے موجود ہے)۔ ٹیم کال پر باقی تفصیل لے لے گی۔ workflow یہیں ختم — نہ نام، نہ عمر، نہ کوئی اور سوال دوبارہ۔
@@ -214,8 +221,11 @@ export async function askBrain(patientMessage, knowledge, history = []) {
   // "minimal" keeps a chat receptionist fast and cheap. Older models
   // (gpt-4o etc.) keep the legacy params so the env override still works.
   const isGpt5 = /^gpt-5/i.test(MODEL);
+  // Minimal, universally-accepted params for GPT-5.x (no reasoning_effort /
+  // temperature — production logs showed this model rejects extras, which
+  // forced a wasteful retry on every single message).
   const params = isGpt5
-    ? { model: MODEL, messages, max_completion_tokens: 2200, reasoning_effort: "minimal" }
+    ? { model: MODEL, messages, max_completion_tokens: 2200 }
     : { model: MODEL, messages, temperature: 0.4, max_tokens: 800 };
   let completion;
   let lastErr;
@@ -245,7 +255,7 @@ export async function askBrain(patientMessage, knowledge, history = []) {
           params.max_completion_tokens = params.max_tokens;
           delete params.max_tokens;
         }
-        console.log(`⚙️ Model rejected a param — retrying with minimal params (${attempt}/3)`);
+        console.log(`⚙️ Model rejected a param (${(e?.message || "").slice(0, 120)}) — retrying with minimal params (${attempt}/3)`);
       } else {
         throw e; // other error, or out of retries
       }
@@ -290,8 +300,8 @@ export async function askBrain(patientMessage, knowledge, history = []) {
   };
 
   // Extract the hidden META JSON. The model sometimes varies the tag
-  // (<<META>>, <META>, <>, or just a trailing {...}). Catch all cases so
-  // the JSON NEVER leaks to the patient.
+  // (<<META>>, <META>, markdown fences, or just a bare {...}). Catch all
+  // cases so the JSON NEVER leaks to the patient.
   let metaJson = null;
 
   // 1) Proper <<META>>...<</META>> wrapper (any bracket variant)
@@ -299,29 +309,97 @@ export async function askBrain(patientMessage, knowledge, history = []) {
   if (m1) {
     reply = raw.replace(m1[0], "").trim();
     metaJson = m1[1].trim();
-  } else {
-    // 2) Any <...>{ ... }<...> style around a JSON object
+  }
+  // 2) Markdown-fenced JSON: ```json { ... } ```
+  if (!metaJson) {
+    const mf = raw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+    if (mf && /"(?:intent|department|lead_complete)"/.test(mf[1])) {
+      reply = raw.replace(mf[0], "").trim();
+      metaJson = mf[1].trim();
+    }
+  }
+  // 3) Any <...>{ ... }<...> style around a JSON object
+  if (!metaJson) {
     const m2 = raw.match(/<[^>]*>\s*(\{[\s\S]*?\})\s*<[^>]*>/);
     if (m2) {
       reply = raw.replace(m2[0], "").trim();
       metaJson = m2[1].trim();
-    } else {
-      // 3) A trailing JSON object containing our known fields
-      const m3 = raw.match(/\{[\s\S]*?"(?:intent|department|lead_complete)"[\s\S]*?\}\s*$/);
-      if (m3) {
-        reply = raw.replace(m3[0], "").trim();
-        metaJson = m3[0].trim();
-      }
+    }
+  }
+  // 4) A trailing JSON object containing our known fields
+  if (!metaJson) {
+    const m3 = raw.match(/\{[\s\S]*?"(?:intent|department|lead_complete)"[\s\S]*?\}\s*$/);
+    if (m3) {
+      reply = raw.replace(m3[0], "").trim();
+      metaJson = m3[0].trim();
+    }
+  }
+  // 5) A META-looking JSON object ANYWHERE in the reply (strip it so it
+  //    never leaks to the patient)
+  if (!metaJson) {
+    const m4 = raw.match(/\{[\s\S]{0,1500}?"(?:intent|department|lead_complete)"[\s\S]*?\}/);
+    if (m4) {
+      reply = raw.replace(m4[0], "").trim();
+      metaJson = m4[0].trim();
     }
   }
 
   if (metaJson) {
     try { meta = { ...meta, ...JSON.parse(metaJson) }; } catch (e) {
-      console.warn(`⚠️ META JSON parse failed (${e.message}) — lead detection missed this turn`);
+      console.warn(`⚠️ META JSON parse failed (${e.message}) — trying extractor`);
+      metaJson = null;
     }
-  } else {
-    // Loud warning: without META the server can never forward a lead.
-    console.warn(`⚠️ No META block in model reply (finish_reason=${finishReason}) — lead detection missed this turn`);
+  }
+
+  // ===== LAST-RESORT META EXTRACTOR =====
+  // Some models simply ignore the inline-META instruction (production logs:
+  // finish_reason=stop, no META, every turn → all leads lost). If META is
+  // missing, make a small dedicated call whose ONLY job is to produce the
+  // META JSON from the conversation. Lead detection must never depend on
+  // one model's formatting obedience.
+  if (!metaJson) {
+    console.warn(`⚠️ No META in model reply (finish_reason=${finishReason}) — recovering via extractor call`);
+    try {
+      const recent = (history || []).slice(-8)
+        .map((h) => `${h.role === "user" ? "PATIENT" : "ZAINAB"}: ${(h.content || "").slice(0, 250)}`)
+        .join("\n");
+      const ex = await openai.chat.completions.create({
+        model: MODEL,
+        messages: [
+          {
+            role: "system",
+            content:
+              'You extract structured state from a hospital receptionist chat. Reply with ONLY one JSON object — no other text, no markdown fences.',
+          },
+          {
+            role: "user",
+            content:
+              `RECENT CONVERSATION:\n${recent}\n\nPATIENT (latest): ${String(patientMessage).slice(0, 1200)}\nZAINAB (reply just sent): ${reply.slice(0, 1200)}\n\n` +
+              `Fill this JSON for the CURRENT state (use "" when unknown):\n` +
+              `{"intent":"","department":"","needs_human":false,"stay_silent":false,"patient_name":"","contact_number":"","address":"","medical_issue":"","visit_at":"","show_form":"","show_menu":false,"lang":"","lead_complete":false,"lead_summary":""}\n\n` +
+              `Rules:\n` +
+              `- department: one of appointment|pharmacy|lab|aesthetic|online|nursing|physio or "" — the service currently being handled.\n` +
+              `- patient_name/contact_number/address/medical_issue: values the PATIENT gave anywhere in this conversation.\n` +
+              `- lang: "ur" if the reply is Urdu, "en" if English.\n` +
+              `- lead_complete: true ONLY if (a) department is nursing/lab/physio/aesthetic AND the reply confirms the booking/request was sent to the team, or (b) department is online AND a payment screenshot was just received/acknowledged. Otherwise false.\n` +
+              `- lead_summary: if lead_complete, one line for the manager (service, name, number, issue/address/time).`,
+          },
+        ],
+        ...(isGpt5 ? { max_completion_tokens: 350 } : { max_tokens: 350, temperature: 0 }),
+      });
+      let exRaw = (ex.choices[0].message.content || "").trim();
+      const exFence = exRaw.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/i);
+      if (exFence) exRaw = exFence[1];
+      const exObj = exRaw.match(/\{[\s\S]*\}/);
+      if (exObj) {
+        meta = { ...meta, ...JSON.parse(exObj[0]) };
+        console.log("🛟 META recovered via extractor call");
+      } else {
+        console.error("❌ Extractor returned no JSON — lead detection missed this turn");
+      }
+    } catch (e) {
+      console.error("❌ META extractor failed:", e.message);
+    }
   }
   // Some models emit booleans as strings ("true"/"false") — "false" is a
   // TRUTHY string in JS and would fire fake leads; normalize strictly.

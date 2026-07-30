@@ -76,7 +76,10 @@ export async function getManagerNumbers(department) {
 }
 
 // Send a lead summary to the right department manager(s) via template.
+// RETURNS true only if at least one manager actually received the lead —
+// the caller must NOT mark the lead as forwarded otherwise.
 export async function forwardLeadToManager(department, summary, patientNumber) {
+  let anyDelivered = false;
   try {
     const managers = await loadManagers();
     const dept = (department || "").trim().toLowerCase();
@@ -94,7 +97,7 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
     }
     if (numbers.length === 0) {
       console.error(`❌ LEAD NOT DELIVERED: Managers sheet has NO numbers at all. Add rows: department | manager_name | whatsapp_number`);
-      return;
+      return false;
     }
 
     // WhatsApp template parameters can't contain newlines, tabs, or 4+
@@ -139,6 +142,7 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
           }
         );
         console.log(`📤 Lead forwarded to ${dept} manager (${to}) via template`);
+        anyDelivered = true;
       } catch (tplErr) {
         // Template failed (e.g. not approved in this account / wrong lang).
         // Log the FULL reason, then try a plain-text message as a fallback
@@ -156,6 +160,7 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
             { headers: { Authorization: `Bearer ${ACCESS_TOKEN}`, "Content-Type": "application/json" } }
           );
           console.log(`📤 Lead forwarded to ${dept} manager (${to}) via plain text (fallback)`);
+          anyDelivered = true;
         } catch (txtErr) {
           console.error(
             `❌ Both template AND text failed for ${dept} (${to}):`,
@@ -167,4 +172,8 @@ export async function forwardLeadToManager(department, summary, patientNumber) {
   } catch (e) {
     console.error("forwardLeadToManager error:", e.response?.data || e.message);
   }
+  if (!anyDelivered) {
+    console.error(`❌ LEAD NOT DELIVERED for "${department}" — check the template ("${TEMPLATE_NAME}", lang "${TEMPLATE_LANG}") approval in Meta Business AND the manager numbers in the Managers sheet.`);
+  }
+  return anyDelivered;
 }
