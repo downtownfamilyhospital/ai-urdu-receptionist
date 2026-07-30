@@ -82,7 +82,7 @@ const FORMS = {
     { id:"whatsapp", label:"WhatsApp Number", type:"tel", req:true, ph:"03XXXXXXXXX" },
     { id:"age", label:"Age", type:"tel", req:true, ph:"عمر" },
     { id:"gender", label:"Gender", type:"radio", req:true, opts:["Male","Female"] } ] },
-  pharmacy: { title: "Medicine Delivery", sub: "گھر پر دوائی منگوائیں", fields: [
+  pharmacy: { title: "Medicine Delivery (24/7)", sub: "گھر پر دوائی منگوائیں — ہر وقت دستیاب", fields: [
     { id:"name", label:"Name", type:"text", req:true, ph:"آپ کا نام" },
     { id:"whatsapp", label:"WhatsApp Number", type:"tel", req:true, ph:"03XXXXXXXXX" },
     { id:"medicine", label:"Medicine Name", type:"textarea", req:true, ph:"دوائیوں کے نام" },

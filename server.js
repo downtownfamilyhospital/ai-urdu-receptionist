@@ -80,40 +80,46 @@ app.use(express.urlencoded({ extended: true }));
 //  message. Pharmacy is 24/7 (never gated). appointment /
 //  aesthetic are hospital-visit referrals — not gated here.
 // =========================================================
+// Times in MINUTES since midnight (PKT) for half-hour precision.
 const SERVICE_HOURS = {
-  online: { open: 9, close: 23 },  // 9:00 AM – 11:00 PM
-  nursing: { open: 9, close: 22 }, // 9:00 AM – 10:00 PM
-  physio: { open: 9, close: 22 },  // 9:00 AM – 10:00 PM
-  lab: { open: 9, close: 22 },     // 9:00 AM – 10:00 PM
+  online: { open: 9 * 60, close: 23 * 60 + 30 }, // 9:00 AM – 11:30 PM
+  nursing: { open: 9 * 60, close: 22 * 60 },     // 9:00 AM – 10:00 PM
+  physio: { open: 9 * 60, close: 22 * 60 },      // 9:00 AM – 10:00 PM
+  lab: { open: 9 * 60, close: 22 * 60 },         // 9:00 AM – 10:00 PM
 };
 
+function pkMinutesNow() {
+  const parts = new Date()
+    .toLocaleString("en-US", { timeZone: "Asia/Karachi", hour12: false, hour: "2-digit", minute: "2-digit" })
+    .split(":");
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
 function pkHourNow() {
-  return parseInt(
-    new Date().toLocaleString("en-US", { timeZone: "Asia/Karachi", hour: "2-digit", hour12: false }),
-    10
-  );
+  // kept for logs: "13:05"-style PKT time
+  const m = pkMinutesNow();
+  return `${Math.floor(m / 60)}:${String(m % 60).padStart(2, "0")}`;
 }
 
 // Returns the closure message if `dept` is currently CLOSED, else null.
 function serviceClosedMessage(dept, lang = "ur") {
   const rule = SERVICE_HOURS[(dept || "").toLowerCase()];
   if (!rule) return null; // pharmacy / appointment / aesthetic / general — never gated
-  const h = pkHourNow();
-  if (h >= rule.open && h < rule.close) return null; // open now
+  const m = pkMinutesNow();
+  if (m >= rule.open && m < rule.close) return null; // open now
 
   const MSGS = {
     online: {
       en:
         "Thank you for contacting Downtown Family Hospital.\n" +
         "Our Online Doctor Consultation service is currently closed.\n" +
-        "Service hours are daily from *9:00 AM to 11:00 PM* (Pakistan Standard Time).\n" +
+        "Service hours are daily from *9:00 AM to 11:30 PM* (Pakistan Standard Time).\n" +
         "Please contact us again after 9:00 AM and our doctors will be happy to assist you.\n" +
         "If your condition is urgent or severe, please visit your nearest emergency department or hospital immediately.\n" +
         "Thank you.",
       ur:
         "ڈاؤن ٹاؤن فیملی ہسپتال سے رابطے کا شکریہ 🌸\n" +
         "ہماری آن لائن ڈاکٹر مشورہ سروس اس وقت بند ہے۔\n" +
-        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات 11 بجے تک* (پاکستانی وقت) ہیں۔\n" +
+        "سروس کے اوقات روزانہ *صبح 9 بجے سے رات ساڑھے 11 بجے تک* (پاکستانی وقت) ہیں۔\n" +
         "براہِ کرم صبح 9 بجے کے بعد دوبارہ رابطہ کریں — ہمارے ڈاکٹرز آپ کی مدد کے لیے حاضر ہوں گے۔\n" +
         "اگر آپ کی حالت سنگین یا ہنگامی ہے تو براہِ کرم فوراً قریب ترین ایمرجنسی یا ہسپتال تشریف لے جائیں۔\n" +
         "شکریہ۔",
@@ -159,8 +165,8 @@ function serviceClosedMessage(dept, lang = "ur") {
         "شکریہ۔",
     },
   };
-  const m = MSGS[(dept || "").toLowerCase()];
-  return m ? (lang === "en" ? m.en : m.ur) : null;
+  const msgSet = MSGS[(dept || "").toLowerCase()];
+  return msgSet ? (lang === "en" ? msgSet.en : msgSet.ur) : null;
 }
 
 // ---- Health check (so you can confirm the server is alive) ----

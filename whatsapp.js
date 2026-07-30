@@ -80,14 +80,14 @@ export async function sendWelcomeMenu(to, lang = "ur", variant = 1) {
   const body = variant <= 1 ? texts[0] : texts[1 + ((variant - 2) % (texts.length - 1))];
   const rows = lang === "en" ? [
     { id: "dept_online", title: "👨‍⚕️ Online Doctor" },
-    { id: "dept_pharmacy", title: "💊 Medicine Delivery" },
+    { id: "dept_pharmacy", title: "Medicine Delivery (24/7)", description: "💊 Open 24 hours, 7 days" },
     { id: "dept_nursing", title: "🏥 Home Nursing" },
     { id: "dept_lab", title: "🧪 Lab Home Sampling" },
     { id: "dept_aesthetic", title: "✨ Aesthetic Appointment" },
     { id: "dept_physio", title: "💪 Home Physiotherapy" },
   ] : [
     { id: "dept_online", title: "👨‍⚕️ آن لائن ڈاکٹر مشورہ" },
-    { id: "dept_pharmacy", title: "💊 گھر پر ادویات" },
+    { id: "dept_pharmacy", title: "💊 گھر پر ادویات (24/7)", description: "ہر وقت دستیاب — چوبیس گھنٹے" },
     { id: "dept_nursing", title: "🏥 گھر پر نرسنگ سروس" },
     { id: "dept_lab", title: "🧪 گھر سے لیب نمونے" },
     { id: "dept_aesthetic", title: "✨ ایستھیٹک اپائنٹمنٹ" },
@@ -112,8 +112,8 @@ export async function sendWelcomeMenu(to, lang = "ur", variant = 1) {
   } catch (e) {
     console.error("welcome menu failed, falling back:", e.response?.data?.error?.message || e.message);
     await sendText(to, body + (lang === "en"
-      ? "\n\n1. Online Doctor  2. Medicine Delivery  3. Home Nursing  4. Lab Sampling  5. Aesthetic  6. Physiotherapy"
-      : "\n\n1. آن لائن ڈاکٹر  2. ادویات  3. نرسنگ  4. لیب  5. ایستھیٹک  6. فزیوتھراپی"));
+      ? "\n\n1. Online Doctor  2. Medicine Delivery (24/7)  3. Home Nursing  4. Lab Sampling  5. Aesthetic  6. Physiotherapy"
+      : "\n\n1. آن لائن ڈاکٹر  2. ادویات (24/7)  3. نرسنگ  4. لیب  5. ایستھیٹک  6. فزیوتھراپی"));
   }
 }
 
