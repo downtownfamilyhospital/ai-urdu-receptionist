@@ -34,7 +34,9 @@ import { askBrain } from "./brain.js";
 import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu } from "./whatsapp.js";
 import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
-import { getPatientMemory, savePatientMemory } from "./patients.js";
+// Personal details (name/address) are never stored — but every contact's
+// WhatsApp NUMBER is registered to the Patients sheet for campaigns.
+import { registerContact } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
 import { loadConversation, saveConversation, clearConversation, cleanupExpired } from "./conversations.js";
@@ -307,8 +309,8 @@ app.post("/webhook", async (req, res) => {
       const lng = message.location?.longitude;
       const pin = lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : "";
       if (pin) {
-        await savePatientMemory(fromFormatted, { pin_location: pin });
-        console.log(`📍 ${from}: location pin saved`);
+        // Not stored permanently — flows into the current conversation only.
+        console.log(`📍 ${from}: location pin received (not stored)`);
       }
       await sendText(
         from,
@@ -385,6 +387,7 @@ app.post("/webhook", async (req, res) => {
       console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
     }
     await touchActivity(fromFormatted);
+    registerContact(fromFormatted).catch(() => {}); // campaign registry (non-blocking)
 
     // 1+2. Load knowledge, corrections, and conversation IN PARALLEL.
     //      Use allSettled so a transient Google hiccup on one read doesn't
@@ -404,10 +407,7 @@ app.post("/webhook", async (req, res) => {
     if (sessionReset) history = []; // fresh session — forget earlier conversation state
     if (!history || history.length === 0) history = getRecentHistory(from);
 
-    // 1b. ALWAYS load saved patient details so Zainab never re-asks.
-    //     Greeting only on a fresh conversation (no active history).
-    const isFreshConversation = !history || history.length === 0;
-    const patientMemory = await getPatientMemory(fromFormatted, isFreshConversation);
+    // No permanent patient memory — every booking collects fresh info.
 
     // 3. Ask the AI brain (include patient memory + ad context + current time)
     const fmtDate = (d) =>
@@ -453,7 +453,7 @@ app.post("/webhook", async (req, res) => {
         brainInput;
     }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
-    if (patientMemory) brainInput = `${patientMemory}\n\n${brainInput}`;
+
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
 
     // If this is a sales/marketing pitch, stay silent (no reply, no saves).
@@ -503,15 +503,7 @@ app.post("/webhook", async (req, res) => {
       needs_human: meta.needs_human,
     });
     // Durable saves in parallel (conversation + patient memory).
-    await Promise.all([
-      saveConversation(fromFormatted, history, patientText, safeReply),
-      // Rule 4: service-specific data (address, pin, times, symptoms) is
-      // TEMPORARY — it lives only in this conversation/lead. Permanently
-      // store only the patient's name.
-      savePatientMemory(fromFormatted, {
-        name: meta.patient_name || "",
-      }),
-    ]);
+    await saveConversation(fromFormatted, history, patientText, safeReply);
 
     // 6. If the AI says the lead is COMPLETE, prepare the manager summary.
     //    (For now we LOG it so we can test collection. Manager delivery
@@ -526,8 +518,8 @@ app.post("/webhook", async (req, res) => {
     const hasNumber = (meta.contact_number || fromFormatted || "").replace(/[^0-9]/g, "").length >= 11;
     // NEW WORKFLOW: pharmacy never creates leads — always a direct referral
     // to the Pharmacy Manager. Hard-block any pharmacy forward.
-    if (meta.lead_complete && (meta.department || "").toLowerCase() === "pharmacy") {
-      console.log(`🚫 Pharmacy lead blocked (referral-only workflow)`);
+    if (meta.lead_complete && ["pharmacy", "appointment"].includes((meta.department || "").toLowerCase())) {
+      console.log(`🚫 ${meta.department} lead blocked (referral-only workflow)`);
     } else if (meta.lead_complete && meta.lead_summary && (!hasName || !hasNumber)) {
       console.log(`⏸️ Lead marked complete but missing ${!hasName ? "name" : "number"} — not forwarding yet`);
     } else if (meta.lead_complete && meta.lead_summary) {

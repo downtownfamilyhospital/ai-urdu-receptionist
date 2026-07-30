@@ -170,3 +170,35 @@ export async function getPatientImageLink(whatsappNumber) {
     return "";
   }
 }
+
+
+// ===== Campaign contact registry =====
+// Save ONLY the WhatsApp number (uniform +923xxxxxxxxx) + last_seen of every
+// person who contacts the chatbot — used for marketing campaigns.
+// No name/address/personal details are stored (per policy).
+// In-memory throttle avoids a Sheet write on every single message.
+const _registered = new Map(); // norm -> last write ms
+const REG_TTL_MS = 6 * 60 * 60 * 1000; // re-touch at most every 6h
+
+export async function registerContact(whatsappNumber) {
+  try {
+    const norm = normalizeNumber(whatsappNumber);
+    if (!norm || norm.length < 11) return;
+    const last = _registered.get(norm) || 0;
+    if (Date.now() - last < REG_TTL_MS) return; // recently registered
+    const sheet = await getPatientsSheet();
+    const rows = await sheet.getRows();
+    const existing = rows.find((r) => normalizeNumber(r.get("whatsapp_number")) === norm);
+    const now = new Date().toISOString();
+    if (existing) {
+      existing.set("last_seen", now);
+      await existing.save();
+    } else {
+      await sheet.addRow({ whatsapp_number: "+" + norm, last_seen: now });
+    }
+    _registered.set(norm, Date.now());
+    console.log(`📇 contact registered for campaigns: +${norm}`);
+  } catch (e) {
+    console.error("registerContact error:", e.message);
+  }
+}
