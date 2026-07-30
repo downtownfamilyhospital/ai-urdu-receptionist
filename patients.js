@@ -16,7 +16,9 @@ const PATIENTS_TAB = "Patients";
 // regardless of whether it was saved as +923..., 923..., or 03...
 function normalizeNumber(num) {
   let n = (num || "").replace(/[^0-9]/g, ""); // digits only
-  if (n.startsWith("0")) n = "92" + n.slice(1); // 03xx... → 923xx...
+  if (n.startsWith("0")) n = "92" + n.slice(1); // 03xx → 923xx
+  else if (n.startsWith("3") && n.length === 10) n = "92" + n; // bare 3001234567 → 923001234567
+  if (n.startsWith("920")) n = "92" + n.slice(3); // 9203xx typo → 923xx // 03xx... → 923xx...
   return n;
 }
 

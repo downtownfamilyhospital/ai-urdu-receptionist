@@ -360,6 +360,18 @@ app.post("/webhook", async (req, res) => {
       return; // don't run the normal AI flow for a correction command
     }
 
+    // ===== 5-minute inactivity reset (rules 6-7): fresh session =====
+    // MUST run before history is loaded/used (declared before any use).
+    let sessionReset = false;
+    const idleMin = minutesSinceLastActivity(fromFormatted);
+    if (idleMin !== null && idleMin > 5) {
+      await setActiveDept(fromFormatted, "");
+      try { await clearConversation(fromFormatted); } catch (e) {}
+      sessionReset = true;
+      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
+    }
+    await touchActivity(fromFormatted);
+
     // 1+2. Load knowledge, corrections, and conversation IN PARALLEL.
     //      Use allSettled so a transient Google hiccup on one read doesn't
     //      break the whole reply — we degrade gracefully instead.
@@ -404,17 +416,6 @@ app.post("/webhook", async (req, res) => {
       `"کل/tomorrow" کا مطلب ${fmtDate(tomorrow)} (${isoDay(tomorrow)})۔ ` +
       `"پرسوں/day after" کا مطلب ${fmtDate(dayAfter)} (${isoDay(dayAfter)})۔ ` +
       `جب مریض "کل"، "پرسوں"، "اگلے ہفتے" وغیرہ کہے تو خلاصے اور visit_at میں ہمیشہ اصل مکمل تاریخ لکھیں (جیسے 5 July 2026)، صرف "کل" نہ لکھیں۔`;
-    // ===== 5-minute inactivity reset (rules 6-7): fresh session =====
-    let sessionReset = false;
-    const idleMin = minutesSinceLastActivity(fromFormatted);
-    if (idleMin !== null && idleMin > 5) {
-      await setActiveDept(fromFormatted, "");
-      try { await clearConversation(fromFormatted); } catch (e) {}
-      sessionReset = true;
-      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
-    }
-    await touchActivity(fromFormatted);
-
     const activeDept = getActiveDept(fromFormatted);
     const lang = getLang(fromFormatted) || "ur";
     const langNote = lang === "en" ? "(زبان: English) " : "(زبان: اردو) ";
@@ -519,7 +520,17 @@ app.post("/webhook", async (req, res) => {
       if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
-        let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}`;
+        // Meta-approved uniform number: patient-provided number normalized to
+        // 923xxxxxxxxx (campaign-ready), falling back to the chat number.
+        const givenDigits = (meta.contact_number || "").replace(/[^0-9]/g, "");
+        const normGiven = givenDigits
+          ? (givenDigits.startsWith("0") ? "92" + givenDigits.slice(1)
+             : (givenDigits.startsWith("3") && givenDigits.length === 10) ? "92" + givenDigits
+             : givenDigits)
+          : "";
+        const chatDigits = fromFormatted.replace(/[^0-9]/g, "");
+        const contactFinal = normGiven || chatDigits;
+        let fullSummary = `${meta.lead_summary}\nPatient name: ${meta.patient_name}\nWhatsApp: +${contactFinal}`;
         await forwardLeadToManager(managerDept, fullSummary, fromFormatted);
         await saveForwardedLead({
           whatsapp_number: fromFormatted,

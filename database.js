@@ -25,7 +25,9 @@ function nowISO() {
 // store and every lookup.
 function normNum(num) {
   let n = (num || "").replace(/[^0-9]/g, "");
-  if (n.startsWith("0")) n = "92" + n.slice(1);
+  if (n.startsWith("0")) n = "92" + n.slice(1); // 03xx → 923xx
+  else if (n.startsWith("3") && n.length === 10) n = "92" + n; // bare 3001234567 → 923001234567
+  if (n.startsWith("920")) n = "92" + n.slice(3); // 9203xx typo → 923xx
   return n;
 }
 
