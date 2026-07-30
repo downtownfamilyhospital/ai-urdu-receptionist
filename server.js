@@ -374,7 +374,11 @@ app.post("/webhook", async (req, res) => {
     // MUST run before history is loaded/used (declared before any use).
     let sessionReset = false;
     const idleMin = minutesSinceLastActivity(fromFormatted);
-    if (idleMin !== null && idleMin > 5) {
+    // 30-min threshold (bank transfers/payments routinely take >5 min), and
+    // an incoming IMAGE never triggers a reset — it is usually the payment
+    // screenshot returning after a transfer delay. Resetting here caused
+    // the "re-asks everything after screenshot" bug.
+    if (idleMin !== null && idleMin > 30 && !isImageMessage) {
       await setActiveDept(fromFormatted, "");
       try { await clearConversation(fromFormatted); } catch (e) {}
       sessionReset = true;
@@ -445,7 +449,7 @@ app.post("/webhook", async (req, res) => {
     }
     if (isImageMessage) {
       brainInput =
-        `(نوٹ: مریض نے ابھی ایک تصویر بھیجی ہے جو آپ نہیں دیکھ سکتیں۔ گفتگو کے سیاق سے فیصلہ کریں: دوا/نسخے کا سیاق → معیاری فارمیسی پیغام کے ساتھ Pharmacy Manager کو ریفر کریں؛ آن لائن کنسلٹیشن کے payment مرحلے کا سیاق → تصویر کو receipt سمجھیں، کہیں ٹیم payment verify کر رہی ہے، WhatsApp نمبر available رکھیں، جیسے ہی ڈاکٹر دستیاب ہوں گے video call ہوگی (کوئی exact وقت نہیں)، اور lead فوراً مکمل کریں؛ ورنہ نرمی سے کہیں کہ آپ تصویر نہیں دیکھ سکتیں، text/voice میں تفصیل مانگیں۔)\n\n` +
+        `(نوٹ: مریض نے ابھی ایک تصویر بھیجی ہے جو آپ نہیں دیکھ سکتیں۔ گفتگو کے سیاق سے فیصلہ کریں: دوا/نسخے کا سیاق → معیاری فارمیسی پیغام کے ساتھ Pharmacy Manager کو ریفر کریں؛ آن لائن کنسلٹیشن کے payment مرحلے کا سیاق → صرف یہ کہیں کہ payment کا *screenshot* موصول ہو گیا ہے اور ٹیم verify کر رہی ہے (کبھی نہ کہیں payment موصول/confirm ہو گئی)، verify ہوتے ہی ڈاکٹر assign ہوگا، اور lead فوراً مکمل کریں — اس کے بعد کوئی سوال نہیں؛ ورنہ نرمی سے کہیں کہ آپ تصویر نہیں دیکھ سکتیں، text/voice میں تفصیل مانگیں۔)\n\n` +
         brainInput;
     }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
@@ -463,6 +467,8 @@ app.post("/webhook", async (req, res) => {
     // HARD SAFETY: never let the "my Urdu is weak" apology slip through,
     // no matter what the model or any old correction says.
     let safeReply = reply
+      // Uniform numbers only — never send wa.me links; convert to plain number.
+      .replace(/https?:\/\/wa\.me\/(\d+)/g, "+$1")
       .replace(/میری اردو[^۔\n]*(کم|کمزور|اچھی)[^۔\n]*۔?/g, "")
       .replace(/اردو[^۔\n]*معذرت[^۔\n]*۔?/g, "")
       .replace(/اردو[^۔\n]*معزرت[^۔\n]*۔?/g, "")
@@ -499,11 +505,11 @@ app.post("/webhook", async (req, res) => {
     // Durable saves in parallel (conversation + patient memory).
     await Promise.all([
       saveConversation(fromFormatted, history, patientText, safeReply),
+      // Rule 4: service-specific data (address, pin, times, symptoms) is
+      // TEMPORARY — it lives only in this conversation/lead. Permanently
+      // store only the patient's name.
       savePatientMemory(fromFormatted, {
         name: meta.patient_name || "",
-        address: meta.address || "",
-        pin_location: meta.pin_location || "",
-        last_service: meta.department || "",
       }),
     ]);
 
@@ -513,7 +519,10 @@ app.post("/webhook", async (req, res) => {
     // Only forward if the lead is genuinely complete: must have a name
     // AND a contact number captured. This stops half-finished leads even
     // if the AI marks complete too early.
-    const hasName = (meta.patient_name || "").trim().length > 1;
+    // Online-consultation screenshot leads forward even without a name —
+    // payment is the critical event; team completes details by call.
+    const isOnlinePaid = (meta.department || "").toLowerCase() === "online";
+    const hasName = (meta.patient_name || "").trim().length > 1 || isOnlinePaid;
     const hasNumber = (meta.contact_number || fromFormatted || "").replace(/[^0-9]/g, "").length >= 11;
     // NEW WORKFLOW: pharmacy never creates leads — always a direct referral
     // to the Pharmacy Manager. Hard-block any pharmacy forward.
@@ -562,9 +571,11 @@ app.post("/webhook", async (req, res) => {
       if (meta.visit_at) {
         await scheduleReminder(fromFormatted, meta.patient_name, meta.lead_summary, meta.visit_at);
       }
-      // Lead is done — clear this patient's conversation memory so the
-      // Sheet stays lean and the next chat starts fresh.
-      await clearConversation(fromFormatted);
+      // Rule 9 (state management): lead done → LOCK the workflow but KEEP
+      // the conversation memory. Wiping history here caused the restart bug
+      // (bot re-asked name/age after the payment screenshot). The patient's
+      // next message still has full context; questionnaire never reopens.
+      await setActiveDept(fromFormatted, "");
     }
   } catch (err) {
     console.error("Webhook error:", err);

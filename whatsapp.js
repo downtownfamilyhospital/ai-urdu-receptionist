@@ -62,7 +62,7 @@ export async function sendLanguageSelect(to) {
 
 // Rotating welcome texts — never the same greeting twice (variant = menuCount).
 const WELCOME_UR = [
-  "السلام علیکم! 🌸\nمیں زینب ہوں — *ڈاؤن ٹاؤن فیملی ہسپتال* میں دل سے خوش آمدید!\n\n✔ ہم ایک *IHRA رجسٹرڈ ہسپتال* ہیں\n✔ پتہ: Belle Road، جی 10 مرکز، اسلام آباد\n✔ اپنی تمام ہیلتھ سروسز کی ہم مکمل ذمہ داری لیتے ہیں\n✔ مزید معلومات: www.dfh.com.pk\n\nآپ مجھ سے کوئی بھی سوال پوچھ سکتے ہیں 🙂 یا نیچے سے اپنی سروس منتخب کریں:",
+  "السلام علیکم! 🌸\nمیں زینب ہوں — *ڈاؤن ٹاؤن فیملی ہسپتال* میں دل سے خوش آمدید!\n\n✔ ہم ایک *آئی ایچ آر اے رجسٹرڈ ہسپتال* ہیں\n✔ پتہ: بیل روڈ، جی ٹین مرکز، اسلام آباد\n✔ اپنی تمام صحت کی خدمات کی ہم مکمل ذمہ داری لیتے ہیں\n✔ ویب سائٹ: www.dfh.com.pk\n\nآپ مجھ سے کوئی بھی سوال پوچھ سکتے ہیں 🙂 یا نیچے سے اپنی سروس منتخب کریں:",
   "جی آیاں نوں! 🌸 میں زینب حاضر ہوں۔\nکوئی سوال ہو تو بلا جھجک پوچھیں، یا نیچے دی گئی سروسز میں سے انتخاب فرمائیں:",
   "خوش آمدید! 🙂 بتائیں آج کس چیز میں مدد کروں؟\nنیچے ہماری سروسز کی فہرست موجود ہے — اپنی ضرورت کی سروس چن لیں:",
   "السلام علیکم! 🌸 بتائیں، آج کیا مدد چاہیے؟\nہماری سروسز نیچے موجود ہیں — منتخب کر لیں، یا کوئی بھی سوال لکھ دیں:",
@@ -210,6 +210,16 @@ async function sendHomeChip(to, lang = "ur") {
 // Aesthetic services list — shown when the patient picks Aesthetic.
 // (Edit rows here to match the knowledge sheet; ids stay aes_*.)
 const AES_ROWS_UR = [
+  { id: "aes_hydrafacial", title: "💧 ہائیڈرا فیشل" },
+  { id: "aes_carbonlaser", title: "✨ کاربن لیزر" },
+  { id: "aes_prp", title: "💉 پی آر پی (جلد و بال)" },
+  { id: "aes_bbglow", title: "🌟 بی بی گلو" },
+  { id: "aes_peel", title: "🍋 کیمیکل پیل" },
+  { id: "aes_whitening", title: "🤍 وائٹننگ ٹریٹمنٹ" },
+  { id: "aes_laserhair", title: "🔦 لیزر ہیئر ریموول" },
+  { id: "aes_other", title: "📋 دیگر / مشورہ" },
+];
+const AES_ROWS_EN_SRC = [
   { id: "aes_hydrafacial", title: "💧 HydraFacial" },
   { id: "aes_carbonlaser", title: "✨ Carbon Laser" },
   { id: "aes_prp", title: "💉 PRP Skin & Hair" },
@@ -217,14 +227,14 @@ const AES_ROWS_UR = [
   { id: "aes_peel", title: "🍋 Chemical Peel" },
   { id: "aes_whitening", title: "🤍 Whitening Treatment" },
   { id: "aes_laserhair", title: "🔦 Laser Hair Removal" },
-  { id: "aes_other", title: "📋 دیگر / مشورہ" },
+  { id: "aes_other", title: "📋 Other / Consultation" },
 ];
-const AES_ROWS_EN = AES_ROWS_UR.map(r => r.id === "aes_other" ? { id: r.id, title: "📋 Other / Consultation" } : r);
+const AES_ROWS_EN = AES_ROWS_EN_SRC;
 
 export async function sendAestheticMenu(to, lang = "ur") {
   const body = lang === "en"
     ? "*Aesthetica by DFH* ✨\nFREE skin consultation with *Dr. Semi Gul* (FCPS Dermatology).\nSelect the treatment you are interested in:"
-    : "*Aesthetica by DFH* ✨\n*ڈاکٹر سیمی گل* (FCPS Dermatology) کے ساتھ *مفت* skin مشورہ۔\nجس treatment میں دلچسپی ہے، منتخب کریں:";
+    : "*ایستھیٹیکا بائے ڈی ایف ایچ* ✨\n*ڈاکٹر سیمی گل* (ماہرِ امراضِ جلد) کے ساتھ جلد کا *مفت* مشورہ۔\nجس علاج میں دلچسپی ہے، منتخب کریں:";
   try {
     await axios.post(
       `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/messages`,
