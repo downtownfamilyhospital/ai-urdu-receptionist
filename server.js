@@ -32,6 +32,7 @@ try {
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
 import { sendText, sendTextWithHome, sendWelcomeMenu } from "./whatsapp.js";
+import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
 import { getPatientMemory, savePatientMemory } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
@@ -60,6 +61,66 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
 // ---- Health check (so you can confirm the server is alive) ----
+// ================= WEB CHAT (form-card interface) =================
+const webHistory = new Map(); // session -> [{role,content}] (in-memory)
+
+app.get("/chat", (req, res) => res.send(chatApp()));
+
+app.post("/chat/api/message", async (req, res) => {
+  try {
+    const { session, text, form } = req.body || {};
+    if (!session) return res.status(400).json({ error: "no session" });
+    const hist = webHistory.get(session) || [];
+
+    // Build the user turn: free text or a structured form submission.
+    let userText = (text || "").trim();
+    if (form && form.formId) {
+      const pairs = Object.entries(form.data || {})
+        .filter(([, v]) => v)
+        .map(([k, v]) => `${k}: ${v}`)
+        .join("، ");
+      userText = `(مریض نے "${form.formId}" فارم جمع کیا — ${pairs})`;
+    }
+    if (!userText) return res.json({ reply: "", show_form: "" });
+
+    const [kRes, cRes] = await Promise.allSettled([loadKnowledge(), loadCorrections()]);
+    const knowledge = kRes.status === "fulfilled" ? kRes.value : "";
+    const corrections = cRes.status === "fulfilled" ? cRes.value : "";
+    const knowledgePlus = corrections ? `${knowledge}\n${corrections}` : knowledge;
+
+    const brainInput =
+      `(صرف آپ کی معلومات کے لیے — چینل: ویب چیٹ۔ معلومات لینے کے لیے META کے show_form استعمال کریں، text فارم نہ لکھیں۔ موجودہ پاکستان وقت: ${new Date().toLocaleString("en-US",{timeZone:"Asia/Karachi",weekday:"long",year:"numeric",month:"long",day:"numeric",hour:"numeric",minute:"2-digit",hour12:true})})\n\n` +
+      userText;
+
+    const { reply, meta } = await askBrain(brainInput, knowledgePlus, hist);
+
+    // maintain short history
+    hist.push({ role: "user", content: userText });
+    hist.push({ role: "assistant", content: reply });
+    while (hist.length > 14) hist.shift();
+    webHistory.set(session, hist);
+
+    // Lead forwarding from web: same rules; pharmacy allowed here (explicit
+    // delivery form), online/nursing/lab route to hospital manager.
+    if (meta.lead_complete && meta.lead_summary) {
+      const dept = (meta.department || "general").toLowerCase();
+      const num = (meta.contact_number || "").replace(/[^0-9]/g, "");
+      if (num.length >= 10) {
+        const managerDept = (dept === "online" || dept === "nursing" || dept === "lab") ? "appointment" : dept;
+        const key = "+92" + num.replace(/^0/, "").replace(/^92/, "");
+        if (!wasRecentlyForwarded(key, dept, 24)) {
+          await forwardLeadToManager(managerDept, `${meta.lead_summary}\nPatient name: ${meta.patient_name}\n(Source: Website chat)`, key);
+          await saveForwardedLead({ whatsapp_number: key, patient_name: meta.patient_name, department: dept, summary: meta.lead_summary });
+        }
+      }
+    }
+    res.json({ reply, show_form: meta.show_form || "" });
+  } catch (e) {
+    console.error("web chat error:", e.message);
+    res.status(500).json({ reply: "معذرت، تھوڑی دیر بعد کوشش کریں 🌸", show_form: "" });
+  }
+});
+
 app.get("/", (req, res) => {
   res.send("AI Urdu Hospital Receptionist is running ✅");
 });

@@ -151,9 +151,10 @@ ${knowledge}
 
 == خفیہ META (ہر جواب کے آخر میں، مریض کو کبھی نظر نہ آئے) ==
 جواب کے بالکل آخر میں یہ لائن لازمی لکھیں:
-<<META>>{"intent":"...","department":"appointment|pharmacy|lab|aesthetic|online|nursing|","needs_human":false,"stay_silent":false,"patient_name":"...","contact_number":"...","address":"...","pin_location":"","visit_at":"","lead_complete":false,"lead_summary":"..."}<</META>>
+<<META>>{"intent":"...","department":"appointment|pharmacy|lab|aesthetic|online|nursing|","needs_human":false,"stay_silent":false,"patient_name":"...","contact_number":"...","address":"...","pin_location":"","visit_at":"","show_form":"","lead_complete":false,"lead_summary":"..."}<</META>>
 - department: فعال شعبہ (عام گفتگو ہو تو "")۔ visit_at: طے شدہ وزٹ کی ISO تاریخ+وقت (مثلاً 2026-07-20T11:00:00+05:00) ورنہ ""۔
-- lead_complete: صرف جب اُس شعبے کی تمام ضروری معلومات مکمل ہوں (pharmacy میں کبھی نہیں)۔ lead_summary: منیجر کے لیے مختصر مکمل خلاصہ (نام، نمبر، سروس، وقت/پتہ — اصل قدریں)۔`;
+- show_form: صرف ویب چیٹ چینل پر (جب پیغام میں "چینل: ویب چیٹ" لکھا ہو): جب معلومات لینے کا وقت آئے تو text فارم نہ لکھیں — show_form میں فارم کا نام دیں: "appointment"، "online"، "pharmacy"، "lab"، "nursing"، یا "feedback"۔ WhatsApp پر ہمیشہ text فارم، show_form خالی ""۔
+- lead_complete: صرف جب اُس شعبے کی تمام ضروری معلومات مکمل ہوں (WhatsApp pharmacy میں کبھی نہیں؛ ویب چیٹ کے pharmacy فارم پر جائز ہے)۔ lead_summary: منیجر کے لیے مختصر مکمل خلاصہ (نام، نمبر، سروس، وقت/پتہ — اصل قدریں)۔`;
 }
 
 export async function askBrain(patientMessage, knowledge, history = []) {
@@ -201,6 +202,7 @@ export async function askBrain(patientMessage, knowledge, history = []) {
     patient_name: "", contact_number: "", address: "",
     pin_location: "",
     visit_at: "",
+    show_form: "",
     stay_silent: false,
     lead_complete: false, lead_summary: "",
   };
