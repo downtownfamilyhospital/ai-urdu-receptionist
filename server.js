@@ -448,9 +448,30 @@ app.post("/webhook", async (req, res) => {
         brainInput;
     }
     if (isImageMessage) {
-      brainInput =
-        `(نوٹ: مریض نے ابھی ایک تصویر بھیجی ہے جو آپ نہیں دیکھ سکتیں۔ گفتگو کے سیاق سے فیصلہ کریں: دوا/نسخے کا سیاق → معیاری فارمیسی پیغام کے ساتھ Pharmacy Manager کو ریفر کریں؛ آن لائن کنسلٹیشن کے payment مرحلے کا سیاق → صرف یہ کہیں کہ payment کا *screenshot* موصول ہو گیا ہے اور ٹیم verify کر رہی ہے (کبھی نہ کہیں payment موصول/confirm ہو گئی)، verify ہوتے ہی ڈاکٹر assign ہوگا، اور lead فوراً مکمل کریں — اس کے بعد کوئی سوال نہیں؛ ورنہ نرمی سے کہیں کہ آپ تصویر نہیں دیکھ سکتیں، text/voice میں تفصیل مانگیں۔)\n\n` +
-        brainInput;
+      // GOLDEN RULE (dept isolation): payment-screenshot recognition exists
+      // ONLY inside the Online Video Consultation department, and only after
+      // payment was requested. Every other department treats an image as a
+      // normal image — never mentions payment — and refers the patient to
+      // that department's own WhatsApp number.
+      const DEPT_IMG_NUM = {
+        pharmacy: "+923700352287",
+        lab: "+923330352287",
+        nursing: "+923330352287",
+        physio: "+923330352287",
+        aesthetic: "+923455216903",
+      };
+      let imgNote;
+      if (activeDept === "online") {
+        imgNote =
+          `(نوٹ: مریض نے تصویر بھیجی ہے۔ فعال شعبہ: آن لائن ویڈیو مشورہ۔ اگر آپ ادائیگی اور اسکرین شاٹ کی درخواست پہلے کر چکی ہیں تو اسے ادائیگی کا اسکرین شاٹ سمجھیں: صرف یہ کہیں کہ اسکرین شاٹ موصول ہو گیا ہے اور ٹیم تصدیق کر رہی ہے (کبھی نہ کہیں ادائیگی موصول/کنفرم ہو گئی)، تصدیق ہوتے ہی ڈاکٹر مقرر ہوگا، lead فوراً مکمل کریں، اس کے بعد کوئی سوال نہیں۔ اگر ابھی ادائیگی کی درخواست نہیں ہوئی تھی تو یہ عام تصویر ہے — نرمی سے کہیں کہ آپ تصویر نہیں پڑھ سکتیں، تفصیل لکھ کر بھیجیں۔)`;
+      } else if (activeDept && DEPT_IMG_NUM[activeDept]) {
+        imgNote =
+          `(نوٹ: مریض نے تصویر بھیجی ہے۔ فعال شعبہ: ${activeDept} — یہ ادائیگی کا اسکرین شاٹ ہرگز نہیں، ادائیگی کا ذکر بالکل نہ کریں۔ نرمی سے کہیں: "میں اس چیٹ میں تصاویر یا ہاتھ سے لکھی دستاویزات درست طور پر نہیں پڑھ سکتی۔ مہربانی کر کے یا تو تصویر میں لکھی معلومات ٹائپ کر دیں، یا یہ تصویر براہِ راست متعلقہ شعبے کے واٹس ایپ نمبر پر بھیج دیں — ہماری ٹیم دیکھ کر مدد کرے گی۔" اور اسی پیغام میں یہ نمبر دیں: ${DEPT_IMG_NUM[activeDept]}۔)`;
+      } else {
+        imgNote =
+          `(نوٹ: مریض نے تصویر بھیجی ہے، کوئی شعبہ فعال نہیں۔ ادائیگی کا ذکر بالکل نہ کریں۔ نرمی سے کہیں کہ آپ تصاویر نہیں پڑھ سکتیں — معلومات لکھ کر بھیجیں یا بتائیں کس سروس سے متعلق ہے تاکہ درست رہنمائی ہو۔)`;
+      }
+      brainInput = imgNote + `\n\n` + brainInput;
     }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
 
