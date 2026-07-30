@@ -403,7 +403,8 @@ app.post("/webhook", async (req, res) => {
       // within 24h). Each template message costs money.
       // "online" is a separate department but its leads go to the SAME
       // hospital (appointment) manager number.
-      const managerDept = (dept === "online" || dept === "nursing") ? "appointment" : dept;
+      // Per latest workflow: online, nursing AND lab leads all go to the Hospital Manager.
+      const managerDept = (dept === "online" || dept === "nursing" || dept === "lab") ? "appointment" : dept;
       if (wasRecentlyForwarded(fromFormatted, dept, 24)) {
         console.log(`🔁 Duplicate lead skipped (${dept}, ${fromFormatted}) — already forwarded within 24h`);
       } else {
