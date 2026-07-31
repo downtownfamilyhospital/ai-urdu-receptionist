@@ -40,7 +40,8 @@ import { registerContact } from "./patients.js";
 import { saveCorrection, loadCorrections } from "./corrections.js";
 import { forwardLeadToManager } from "./managers.js";
 import { loadConversation, saveConversation, clearConversation, cleanupExpired } from "./conversations.js";
-import { scheduleReminder, processReminders } from "./reminders.js";
+// Appointment reminders are DISABLED by owner request (2026-07-31):
+// no reminder is scheduled or sent to patients or managers anywhere.
 import { runCampaign, getApprovedTemplates } from "./campaign.js";
 import { getAllPatients } from "./patients.js";
 import {
@@ -741,6 +742,8 @@ app.post("/webhook", async (req, res) => {
         const issueFinal = ((meta.medical_issue || col.medical_issue || "").trim()) || "-";
         let fullSummary;
         if (dept === "online") {
+          // Internal triage (never shown to the patient) — from the brain's summary.
+          const suggested = (meta.lead_summary || "").match(/Suggested:\s*(Family Physician|Medical Specialist)/i);
           // Required format for online doctor consultation leads:
           fullSummary =
             `🩺 ONLINE DR CONSULTATION LEAD\n` +
@@ -748,6 +751,7 @@ app.post("/webhook", async (req, res) => {
             `WhatsApp No: +${contactFinal}\n` +
             `Medical Issue: ${issueFinal}\n` +
             `Screenshot uploaded: Yes\n` +
+            (suggested ? `${suggested[0]}\n` : "") +
             `(Please check, confirm and call the patient on WhatsApp within 10 minutes)`;
         } else {
           // If the brain forgot the summary, synthesize one — never lose a lead.
@@ -770,10 +774,7 @@ app.post("/webhook", async (req, res) => {
           console.error(`❌ LEAD SEND FAILED (${dept}) — not marked as forwarded; will retry on the next trigger`);
         }
       }
-      // Schedule a 1-hour-before reminder if a visit time was captured.
-      if (meta.visit_at) {
-        await scheduleReminder(fromFormatted, meta.patient_name, meta.lead_summary, meta.visit_at);
-      }
+      // (Appointment reminders disabled — nothing is scheduled here.)
       // Rule 9 (state management): lead done → LOCK the workflow but KEEP
       // the conversation memory. Wiping history here caused the restart bug
       // (bot re-asked name/age after the payment screenshot). The patient's
@@ -1356,7 +1357,8 @@ setInterval(async () => {
   }
 }, 30 * 60 * 1000);
 
-// Every 15 minutes, check for appointments ~3h away and send reminders.
-setInterval(() => {
+// Appointment reminders DISABLED by owner request — the scheduler below
+// is intentionally removed (no reminders to patients or managers).
+/* setInterval(() => {
   processReminders().catch((e) => console.error("reminder error:", e.message));
-}, 15 * 60 * 1000);
+}, 15 * 60 * 1000); */
