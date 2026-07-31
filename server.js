@@ -67,7 +67,46 @@ import {
   clearCollected,
   getLastWeeklyReport,
   setLastWeeklyReport,
+  getPendingAd,
+  setPendingAd,
 } from "./database.js";
+
+// ===== Meta-ad generic openers =====
+// Click-to-WhatsApp ads pre-fill messages like "How can I get more info?".
+// These carry ZERO real intent — treat them exactly like a greeting:
+// warm welcome + language buttons, then the services menu.
+// A SPECIFIC question (mentions a service/doctor/price of something) is NOT
+// intercepted — the brain answers it directly.
+function isGenericAdOpener(raw) {
+  const t = (raw || "")
+    .toLowerCase()
+    .replace(/[!.,؟?،۔'’"]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!t) return false;
+  const exact = [
+    "how can i get more info", "can i get more info", "i want more info",
+    "more info", "more information", "info", "information", "details", "detail",
+    "i'd like to know more", "i would like to know more", "tell me more",
+    "know more", "learn more", "get started", "interested", "i am interested",
+    "i'm interested", "im interested", "need info", "need information",
+    "share details", "kindly share details", "send details", "price", "prices",
+    "rates", "charges", "fees", "which doctor", "which dr", "kaunsa doctor",
+    "konsa doctor", "kon sa doctor", "doctor available", "mazeed malumat",
+    "malumat", "maloomat", "malumat chahiye", "maloomat chahiye", "tafseel",
+    "tafseelat", "مزید معلومات", "معلومات", "معلومات چاہیے", "تفصیل",
+    "تفصیلات", "کون سا ڈاکٹر", "کونسا ڈاکٹر", "قیمت", "فیس", "ریٹ",
+  ];
+  if (exact.includes(t)) return true;
+  // Short message with a generic-intent keyword but NO specific service/doctor
+  // named → still a generic opener.
+  if (t.split(" ").length <= 7) {
+    const genericKey = /(more info|more information|get info|know more|tell me more|learn more|interested|details?|information|maloomat|malumat|tafseel|which doctor|which dr|kaunsa doctor|konsa doctor|kon sa doctor|مزید معلومات|معلومات|تفصیل|دلچسپی)/;
+    const specific = /(prp|hydra|facial|laser|peel|glow|whitening|physio|pharm|medicin|dawai|dava|lab|test|nursing|nurse|ultrasound|x-?ray|gyn|dental|derma|skin|hair|sugar|bp|fever|price of|fee of|rate of|dr\s+[a-z\u0600-\u06FF])/;
+    if (genericKey.test(t) && !specific.test(t)) return true;
+  }
+  return false;
+}
 import { runWeeklyAnalysis, sendWeeklyReport } from "./weekly-analysis.js";
 
 const app = express();
@@ -370,11 +409,18 @@ app.post("/webhook", async (req, res) => {
       // Language switch by typing
       if (["english", "انگلش", "انگریزی"].includes(lower0)) { await setLang(fromFormatted, "en"); await sendTextWithHome(from, "Language set to English ✅ How can I help you?", "en"); return; }
       if (["urdu", "اردو"].includes(lower0)) { await setLang(fromFormatted, "ur"); await sendTextWithHome(from, "زبان اردو ہو گئی ✅ بتائیں کیا مدد کروں؟", "ur"); return; }
-      // Pure greeting on a fresh conversation → intro + menu (deterministic welcome)
+      // Greeting OR generic Meta-ad auto-message ("How can I get more info?",
+      // "which doctor", "hi") → deterministic welcome flow:
+      //   1st contact → warm welcome + language buttons
+      //   language known + fresh chat → welcome menu with the services list
+      // Specific questions are NOT intercepted — the brain answers directly.
       const greetings = ["hi","hello","hey","salam","aoa","assalamualaikum","assalam o alaikum","السلام علیکم","سلام","اسلام علیکم"];
-      if (greetings.includes(lower0.replace(/[!.،۔]/g, "").trim())) {
+      const isOpener = greetings.includes(lower0.replace(/[!.،۔]/g, "").trim()) || isGenericAdOpener(patientText);
+      if (isOpener) {
+        // Never lose WHICH ad they clicked — park it for after language choice.
+        if (adContext) await setPendingAd(fromFormatted, adContext);
         if (!getLang(fromFormatted)) {
-          await sendLanguageSelect(from); // very first contact: language choice
+          await sendLanguageSelect(from); // very first contact: welcome + language choice
           return;
         }
         const hist0 = await loadConversation(fromFormatted);
@@ -383,6 +429,7 @@ app.post("/webhook", async (req, res) => {
           await sendWelcomeMenu(from, getLang(fromFormatted), v);
           return;
         }
+        // Mid-conversation greeting → let the brain handle it with context.
       }
       // Content-ful first message: DON'T force language buttons — the brain
       // auto-detects the patient's language (English vs Urdu/Roman Urdu)
@@ -619,6 +666,17 @@ app.post("/webhook", async (req, res) => {
           `(نوٹ: مریض نے تصویر بھیجی ہے، کوئی شعبہ فعال نہیں۔ ادائیگی کا ذکر بالکل نہ کریں۔ نرمی سے کہیں کہ آپ تصاویر نہیں پڑھ سکتیں — معلومات لکھ کر بھیجیں یا بتائیں کس سروس سے متعلق ہے تاکہ درست رہنمائی ہو۔)`;
       }
       brainInput = imgNote + `\n\n` + brainInput;
+    }
+    // If the ad click was intercepted by the language-select step, the ad
+    // details were parked — retrieve them now so Zainab still acknowledges
+    // the specific ad/service the patient came from.
+    if (!adContext) {
+      const parkedAd = getPendingAd(fromFormatted);
+      if (parkedAd) {
+        adContext = parkedAd;
+        await setPendingAd(fromFormatted, ""); // use once, then clear
+        console.log(`📣 Injecting parked ad context for ${from}`);
+      }
     }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
 

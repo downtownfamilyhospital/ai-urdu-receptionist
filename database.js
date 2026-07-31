@@ -16,6 +16,7 @@ if (!db.data.langState) db.data.langState = {}; // "ur" | "en" per patient
 if (!db.data.menuCount) db.data.menuCount = {}; // how many times home menu shown (welcome variants)
 if (!db.data.collected) db.data.collected = {}; // captured booking fields per patient (never re-ask)
 if (!db.data.lastWeeklyReport) db.data.lastWeeklyReport = ""; // ISO time of last weekly analysis
+if (!db.data.pendingAd) db.data.pendingAd = {}; // ad context parked while patient picks a language
 
 function nowISO() {
   return new Date().toISOString();
@@ -188,6 +189,21 @@ export async function bumpMenuCount(whatsapp_number) {
   db.data.menuCount[k] = (db.data.menuCount[k] || 0) + 1;
   await db.write();
   return db.data.menuCount[k];
+}
+
+
+// ===== V2.6: pending ad context =====
+// When a Meta-ad click arrives with a GENERIC auto-message ("How can I get
+// more info?", "Hi"), we intercept with the language-select buttons — but we
+// must not lose WHICH ad they clicked. The ad headline/body is parked here
+// and injected into the brain on the patient's next real message.
+export function getPendingAd(whatsapp_number) {
+  return db.data.pendingAd[normNum(whatsapp_number)] || "";
+}
+export async function setPendingAd(whatsapp_number, ctx) {
+  const k = normNum(whatsapp_number);
+  if (ctx) db.data.pendingAd[k] = ctx; else delete db.data.pendingAd[k];
+  await db.write();
 }
 
 

@@ -46,7 +46,7 @@ export async function sendLanguageSelect(to) {
         type: "interactive",
         interactive: {
           type: "button",
-          body: { text: "Welcome to Downtown Family Hospital! 🌸\nPlease select your preferred language.\nبراہ کرم اپنی پسندیدہ زبان منتخب کریں۔" },
+          body: { text: "🌸 *Downtown Family Hospital* میں خوش آمدید!\nWelcome! I'm *Zainab*, your personal assistant — here to help you 24/7. 😊\n\nPlease select your preferred language 👇\nبراہ کرم اپنی پسندیدہ زبان منتخب کریں 👇" },
           action: { buttons: [
             { type: "reply", reply: { id: "lang_ur", title: "اردو" } },
             { type: "reply", reply: { id: "lang_en", title: "English" } },
