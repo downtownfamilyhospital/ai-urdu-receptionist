@@ -453,6 +453,37 @@ app.get("/", (req, res) => {
 
 // Diagnostic: test outbound network to Google + OpenAI. Visit /diag
 // in your browser to see if the container can reach the internet.
+// WhatsApp connection diagnostic. Open /diag/wa in a browser:
+// tells you instantly if the ACCESS TOKEN is dead (the #1 cause of a
+// completely silent bot — everything fails but nothing looks broken).
+app.get("/diag/wa", async (req, res) => {
+  const out = { time: new Date().toISOString() };
+  out.phone_number_id_set = !!process.env.WA_PHONE_NUMBER_ID;
+  out.access_token_set = !!process.env.WA_ACCESS_TOKEN;
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/v21.0/${process.env.WA_PHONE_NUMBER_ID}?fields=display_phone_number,verified_name,quality_rating`,
+      { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } }
+    );
+    const d = await r.json();
+    if (r.ok) {
+      out.token_status = "VALID ✅";
+      out.whatsapp_number = d.display_phone_number;
+      out.verified_name = d.verified_name;
+      out.quality_rating = d.quality_rating;
+    } else {
+      out.token_status = "FAILED ❌ — bot cannot send ANY messages";
+      out.meta_error = d.error?.message || d;
+      out.fix = "Generate a new permanent token in Meta Business settings and update WA_ACCESS_TOKEN in Railway → Variables, then redeploy.";
+    }
+  } catch (e) {
+    out.token_status = "NETWORK FAIL ❌";
+    out.error = e.message;
+  }
+  out.cached_video_media_id = getVideoMediaId() || "(none — video will not send)";
+  res.json(out);
+});
+
 // Video pipeline diagnostic. Open in a browser:
 //   /diag/video              → is the file present, is the URL reachable?
 //   /diag/video?upload=1     → force an upload, show the media_id or Meta's error
@@ -616,7 +647,11 @@ app.post("/webhook", async (req, res) => {
 
       // ===== Manual "how do I use this chatbot" → resend tutorial video =====
       // Per spec: never auto-resend, but DO resend on explicit request.
-      const howToUse = /(how (do|can) i use|how does this (chatbot|bot|work)|how to (use|book)( this)?( chatbot| service)?|tutorial|instructions?\b.*chatbot|کیسے استعمال|استعمال کرنا|بکنگ کیسے|کیسے بک)/i;
+      // ===== "How do I use this?" → ALWAYS resend the tutorial video =====
+      // Fires regardless of whether the video was already sent before.
+      // Covers English, Urdu and Roman-Urdu phrasings, plus direct video
+      // requests ("send video", "video bhejo") for easy testing.
+      const howToUse = /(how (do|can) (i|we) use|how does (this|the) (chatbot|bot|app) work|how to (use|book|order|chat)|how (this|the) (bot|chatbot) works?|tutorial|user ?manual|(send|share) (me )?(the )?(video|guide)|video (bhejo|bhej do|send|chahiye|dobara)|(bot|chatbot|zainab) (kaise|kese|kis tarah)|kaise (use|istemal|chalana|book)|istemal (kaise|kese)|کیسے استعمال|استعمال (کیسے|کرنا)|بکنگ کیسے|کیسے بک|ویڈیو (بھیجیں|بھیجو|بھیج دیں|چاہیے)|رہنمائی ویڈیو|طریقہ (کار)? ?بتائیں)/i;
       if (howToUse.test(lower0)) {
         console.log(`📹 ${from}: asked how to use the chatbot — resending tutorial video`);
         const ok = await sendTutorialVideo(from, req);
@@ -1289,7 +1324,11 @@ $('#btn').onclick=async()=>{
     $('#btn').disabled=false;$('#btn').textContent='Upload to WhatsApp';
     try{const r=JSON.parse(xhr.responseText);
       $('#log').innerHTML=r.ok
-        ?'<span class="ok">Installed ✅ media_id: '+r.media_id+'</span><br>Patients will now receive the video.'
+        ?'<span class="ok">Installed ✅ media_id: '+r.media_id+'</span><br>Patients will now receive the video.'+
+         '<br><br><b>⚠️ Important:</b> Railway erases this on every redeploy. To make it permanent:'+
+         '<br>1. Copy this id: <code>'+r.media_id+'</code>'+
+         '<br>2. Railway → your service → <b>Variables</b> → add <b>WA_VIDEO_MEDIA_ID</b> = the id'+
+         '<br>3. Redeploy once. Done forever.'
         :'<span class="bad">Failed ❌ '+(r.error||'')+'</span>';
     }catch(e){$('#log').innerHTML='<span class="bad">Failed ❌ '+xhr.status+'</span>';}
   };
@@ -1797,7 +1836,23 @@ app.get("/portal/weekly", async (req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+app.listen(PORT, async () => {
+  console.log(`✅ Server running on port ${PORT}`);
+  // Boot self-check: verify the WhatsApp token immediately, so a dead token
+  // shows up in the very first log lines instead of a silently mute bot.
+  try {
+    const r = await fetch(
+      `https://graph.facebook.com/v21.0/${process.env.WA_PHONE_NUMBER_ID}?fields=display_phone_number`,
+      { headers: { Authorization: `Bearer ${process.env.WA_ACCESS_TOKEN}` } }
+    );
+    const d = await r.json();
+    if (r.ok) console.log(`✅ WhatsApp token OK — number ${d.display_phone_number}`);
+    else console.error(`❌❌❌ WHATSAPP TOKEN FAILED — BOT CANNOT SEND ANYTHING: ${d.error?.message}`);
+  } catch (e) {
+    console.error(`❌ WhatsApp boot check network error: ${e.message}`);
+  }
+  console.log(`🎬 Tutorial video media_id: ${getVideoMediaId() || "NOT SET — upload at /portal/video"}`);
+});
 
 // Every hour, remove expired conversation rows so the Sheet stays lean.
 setInterval(() => {

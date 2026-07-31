@@ -205,10 +205,13 @@ export async function bumpMenuCount(whatsapp_number) {
 // media for 30). Cleared automatically if a send ever fails with a stale id.
 export function getVideoMediaId() {
   const rec = db.data.videoMedia;
-  if (!rec?.id) return "";
-  const days = (Date.now() - new Date(rec.uploaded_at).getTime()) / 86400000;
-  if (days > 25) return ""; // treat as expired → re-upload
-  return rec.id;
+  if (rec?.id) {
+    const days = (Date.now() - new Date(rec.uploaded_at).getTime()) / 86400000;
+    if (days <= 25) return rec.id;
+  }
+  // Fallback: Railway wipes hospital.json on every redeploy, so the owner can
+  // pin the id permanently in an env var (Railway → Variables).
+  return process.env.WA_VIDEO_MEDIA_ID || "";
 }
 export async function setVideoMediaId(id) {
   db.data.videoMedia = id ? { id, uploaded_at: nowISO() } : null;
