@@ -40,11 +40,17 @@ export async function sendText(to, text) {
 // the file once to WhatsApp's own media store, get a media_id, and send that.
 // We cache the id (see database.js) and only re-upload when it goes stale.
 
-// Upload a local file to WhatsApp's media store → returns media_id or "".
-export async function uploadVideoToWhatsApp(filePath) {
+// Upload a video to WhatsApp's media store → returns media_id or "".
+// Accepts either a local file path OR a raw Buffer (browser upload).
+export async function uploadVideoToWhatsApp(fileOrBuffer) {
   try {
-    const { readFile } = await import("node:fs/promises");
-    const buf = await readFile(filePath);
+    let buf;
+    if (Buffer.isBuffer(fileOrBuffer)) {
+      buf = fileOrBuffer;
+    } else {
+      const { readFile } = await import("node:fs/promises");
+      buf = await readFile(fileOrBuffer);
+    }
     const form = new FormData();
     form.append("messaging_product", "whatsapp");
     form.append("type", "video/mp4");

@@ -250,28 +250,31 @@ const TUTORIAL_CAPTION =
 // There is deliberately NO link fallback: sending by URL is what made the
 // video show up as a plain link instead of a playable file.
 async function sendTutorialVideo(to, req) {
-  const fs = await import("node:fs");
-  if (!fs.existsSync(TUTORIAL_VIDEO_PATH)) {
-    console.error(`❌ tutorial video missing on disk at ${TUTORIAL_VIDEO_PATH} — did public/ get committed to GitHub?`);
-    return false;
-  }
-
-  // 1. cached media_id
+  // 1. Cached media_id — the normal path. Works whether or not the .mp4 is
+  //    on this server, because WhatsApp is holding the file for us.
   const cachedId = getVideoMediaId();
   if (cachedId) {
     if (await sendVideoById(to, cachedId, TUTORIAL_CAPTION)) return true;
-    console.warn("⚠️ cached media_id rejected — clearing and re-uploading");
+    console.warn("⚠️ cached media_id rejected — clearing, will re-upload");
     await setVideoMediaId("");
   }
 
-  // 2. upload the actual file, then send it by its new media_id
-  const newId = await uploadVideoToWhatsApp(TUTORIAL_VIDEO_PATH);
-  if (newId) {
-    await setVideoMediaId(newId);
-    if (await sendVideoById(to, newId, TUTORIAL_CAPTION)) return true;
+  // 2. No usable id → upload the bundled file, if the repo happens to have it.
+  const fs = await import("node:fs");
+  if (fs.existsSync(TUTORIAL_VIDEO_PATH)) {
+    const newId = await uploadVideoToWhatsApp(TUTORIAL_VIDEO_PATH);
+    if (newId) {
+      await setVideoMediaId(newId);
+      if (await sendVideoById(to, newId, TUTORIAL_CAPTION)) return true;
+    }
+  } else {
+    console.error(
+      `❌ No tutorial video available.\n` +
+      `   • no media_id cached, and\n` +
+      `   • no file at ${TUTORIAL_VIDEO_PATH}\n` +
+      `   FIX: open /portal/video in a browser and upload the .mp4 once.`
+    );
   }
-
-  console.error("❌ tutorial video could not be uploaded/sent — see Meta error above");
   return false;
 }
 
@@ -1215,6 +1218,110 @@ app.post("/portal/login", (req, res) => {
     return res.redirect("/portal");
   }
   res.send(loginPage("Galat username ya password"));
+});
+
+// ===== VIDEO UPLOAD PAGE =====
+// The tutorial video does NOT need to live in the GitHub repo. What actually
+// matters is the WhatsApp media_id. Upload the .mp4 here once from any phone
+// or PC, and it is stored in WhatsApp's own media library — the bot then
+// sends it by id forever, with no file on this server at all.
+app.get("/portal/video", (req, res) => {
+  if (!isLoggedIn(req)) return res.send(loginPage(""));
+  const current = getVideoMediaId();
+  res.send(`<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tutorial Video — Zainab</title>
+<style>
+ body{font-family:system-ui,Arial;margin:0;background:#f6f7f9;color:#111}
+ .wrap{max-width:560px;margin:0 auto;padding:24px}
+ .card{background:#fff;border-radius:14px;padding:22px;box-shadow:0 2px 10px rgba(0,0,0,.07);margin-bottom:16px}
+ h2{margin:0 0 6px}
+ .muted{color:#667;font-size:14px}
+ .ok{color:#0a7d33;font-weight:600}.bad{color:#b00020;font-weight:600}
+ input[type=file]{width:100%;padding:14px;border:2px dashed #cbd2dd;border-radius:10px;background:#fafbfc;margin:14px 0}
+ button{background:#0a7d33;color:#fff;border:0;padding:14px 20px;border-radius:10px;font-size:16px;width:100%;cursor:pointer}
+ button:disabled{background:#9aa}
+ .bar{height:8px;background:#e5e8ee;border-radius:6px;overflow:hidden;margin-top:12px;display:none}
+ .bar i{display:block;height:100%;width:0;background:#0a7d33;transition:width .2s}
+ #log{margin-top:14px;font-size:14px;white-space:pre-wrap}
+ input[type=tel]{width:100%;padding:12px;border:1px solid #cbd2dd;border-radius:10px;margin:10px 0;font-size:16px}
+ a{color:#0a7d33}
+</style></head><body><div class="wrap">
+ <div class="card">
+  <h2>🎬 Tutorial Video</h2>
+  <p class="muted">Status: ${current
+    ? `<span class="ok">Installed ✅</span><br><span class="muted">media_id: ${current}</span>`
+    : `<span class="bad">Not installed ❌</span> — first-time patients are not receiving a video.`}</p>
+ </div>
+
+ <div class="card">
+  <h2>Upload / replace</h2>
+  <p class="muted">Choose your <b>user_manual.mp4</b> (max 16 MB, H.264 + AAC).
+  It uploads straight to WhatsApp — nothing is stored on this server.</p>
+  <input type="file" id="f" accept="video/mp4">
+  <button id="btn">Upload to WhatsApp</button>
+  <div class="bar" id="bar"><i></i></div>
+  <div id="log"></div>
+ </div>
+
+ <div class="card">
+  <h2>Send a test</h2>
+  <p class="muted">Enter a WhatsApp number with country code, no + or spaces.</p>
+  <input type="tel" id="num" placeholder="923001234567">
+  <button id="tbtn">Send test video</button>
+  <div id="tlog" class="muted"></div>
+ </div>
+ <p class="muted"><a href="/portal">← Back to portal</a></p>
+
+<script>
+const $=s=>document.querySelector(s);
+$('#btn').onclick=async()=>{
+  const f=$('#f').files[0];
+  if(!f){$('#log').innerHTML='<span class="bad">Pick a file first.</span>';return;}
+  if(f.size>16*1024*1024){$('#log').innerHTML='<span class="bad">Too big — WhatsApp limit is 16 MB.</span>';return;}
+  $('#btn').disabled=true;$('#btn').textContent='Uploading…';$('#bar').style.display='block';
+  const xhr=new XMLHttpRequest();
+  xhr.open('POST','/portal/video/upload');
+  xhr.setRequestHeader('Content-Type','video/mp4');
+  xhr.upload.onprogress=e=>{if(e.lengthComputable)$('#bar i').style.width=(e.loaded/e.total*100)+'%';};
+  xhr.onload=()=>{
+    $('#btn').disabled=false;$('#btn').textContent='Upload to WhatsApp';
+    try{const r=JSON.parse(xhr.responseText);
+      $('#log').innerHTML=r.ok
+        ?'<span class="ok">Installed ✅ media_id: '+r.media_id+'</span><br>Patients will now receive the video.'
+        :'<span class="bad">Failed ❌ '+(r.error||'')+'</span>';
+    }catch(e){$('#log').innerHTML='<span class="bad">Failed ❌ '+xhr.status+'</span>';}
+  };
+  xhr.onerror=()=>{$('#btn').disabled=false;$('#log').innerHTML='<span class="bad">Network error.</span>';};
+  xhr.send(f);
+};
+$('#tbtn').onclick=async()=>{
+  const n=$('#num').value.replace(/[^0-9]/g,'');
+  if(!n){$('#tlog').innerHTML='<span class="bad">Enter a number.</span>';return;}
+  $('#tlog').textContent='Sending…';
+  const r=await fetch('/portal/video/test?to='+n).then(r=>r.json()).catch(()=>({ok:false}));
+  $('#tlog').innerHTML=r.ok?'<span class="ok">Sent ✅ check WhatsApp</span>':'<span class="bad">Failed ❌ see Railway logs</span>';
+};
+</script></div></body></html>`);
+});
+
+// Receives the raw .mp4 body (no multipart parser needed) and hands it
+// straight to WhatsApp's media API.
+app.post("/portal/video/upload", express.raw({ type: "video/mp4", limit: "20mb" }), async (req, res) => {
+  if (!isLoggedIn(req)) return res.status(401).json({ ok: false, error: "auth" });
+  if (!req.body || !req.body.length) return res.json({ ok: false, error: "empty upload" });
+  console.log(`⬆️ portal: received ${req.body.length} bytes for tutorial video`);
+  const id = await uploadVideoToWhatsApp(req.body);
+  if (!id) return res.json({ ok: false, error: "WhatsApp rejected the upload — check Railway logs" });
+  await setVideoMediaId(id);
+  res.json({ ok: true, media_id: id });
+});
+
+app.get("/portal/video/test", async (req, res) => {
+  if (!isLoggedIn(req)) return res.status(401).json({ ok: false });
+  const to = String(req.query.to || "").replace(/[^0-9]/g, "");
+  if (!to) return res.json({ ok: false });
+  res.json({ ok: await sendTutorialVideo(to, req) });
 });
 
 app.get("/portal/logout", (req, res) => {
