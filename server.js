@@ -6,6 +6,10 @@
 
 import "dotenv/config";
 import express from "express";
+import path from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ---- NETWORK FIX for ERR_STREAM_PREMATURE_CLOSE ----
 // Some Node builds drop gzip-compressed HTTPS responses mid-stream on
@@ -31,7 +35,7 @@ try {
 
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
-import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu } from "./whatsapp.js";
+import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu, sendVideo } from "./whatsapp.js";
 import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
 // Personal details (name/address) are never stored — but every contact's
@@ -69,6 +73,11 @@ import {
   setLastWeeklyReport,
   getPendingAd,
   setPendingAd,
+  getVideoSent,
+  setVideoSent,
+  clearLang,
+  getAwaitingPayment,
+  setAwaitingPayment,
 } from "./database.js";
 
 // ===== Meta-ad generic openers =====
@@ -107,11 +116,126 @@ function isGenericAdOpener(raw) {
   }
   return false;
 }
+
+// ===== Non-patient enquiry filter (jobs, CVs, vendors, marketing, sales) =====
+// This platform is for patients only. Anything matching here gets ONE fixed
+// reply and nothing else — no follow-up questions, no data collection, no
+// department handoff, no lead saved.
+const NON_PATIENT_REPLY =
+  "This WhatsApp platform is exclusively designed to assist patients with Downtown Family Hospital's healthcare services. For job applications, business proposals, marketing services, vendor enquiries, or any other non-patient matters, please email us at downtownfamilyhospital@gmail.com. Thank you for your understanding.";
+
+function isNonPatientEnquiry(raw) {
+  const t = (raw || "").toLowerCase();
+  if (!t.trim()) return false;
+  const patterns = [
+    // jobs / CVs / hiring
+    /\bjob\b|\bjobs\b|vacan(c|t)|hiring|\bhire\b|\bcareer/,
+    /\bcv\b|resume|resúmé|attach(ed|ing)? (my|our)? ?cv/,
+    /internship|apprentice/,
+    // marketing / SEO / social media / ads services being pitched TO the hospital
+    /(seo|social media|digital marketing|meta ads|facebook ads|google ads|marketing (agency|services|package|packages))/,
+    /(web design|website design|app development|software (development|solution|services|house)|develop(ing)? (a|an|your) (app|website|software)|build(ing)? (your|you an?) (app|website|software))/,
+    // selling / vendor / partnership pitches
+    /(we (are|'re) offering|we provide|we specialize|our (agency|company|services)|our client)/,
+    /(partnership|collaborat(e|ion)|business proposal|sponsorship|vendor|supplier|distributor(ship)?)/,
+    /(bulk (order|price)|wholesale|manufactur(er|ing)|import(er)?\/export(er)?)/,
+    /(buy (our|this)|purchase (our|this)|invest(ment)? opportunity)/,
+    // Urdu/Roman-Urdu equivalents
+    /nokri|naukri|job chahiye|vacancy hai/,
+    /مارکیٹنگ|نوکری|ملازمت|سی وی/,
+  ];
+  return patterns.some((re) => re.test(t));
+}
+
+// ===== V2.8: smart session-timeout engine =====
+// A flat 5-minute wipe is wrong for a hospital: a patient who leaves to fetch
+// their CNIC, check a lab slip, or make a bank transfer comes back to a blank
+// slate and has to re-do everything. Instead the timeout scales with how deep
+// the patient is into a workflow, and the RESET TYPE scales with it too.
+//
+//   stage            | idle limit | on timeout
+//   -----------------|------------|---------------------------------------
+//   browsing         |   5 min    | HARD  — wipe all, back to language select
+//   engaged (dept)   |  20 min    | SOFT  — keep lang+dept, clear stale chat
+//   booking (data)   |  45 min    | SOFT  — keep everything, resume politely
+//   awaiting payment |  24 hours  | SOFT  — never lose a paying patient
+//
+// HARD reset = full wipe + language selection again (the "5-minute rule").
+// SOFT reset = drop only the stale conversation transcript; language, chosen
+// department and already-collected details survive, so Zainab picks up where
+// they left off instead of interrogating them a second time.
+function classifySession({ idleMin, activeDept, collected, awaitingPayment, isImageMessage }) {
+  if (idleMin === null) return { action: "none", stage: "new" };
+
+  // Deepest protection first: a payment is pending. Screenshots legitimately
+  // arrive hours later (bank app queues, OTP delays, "I'll pay after Maghrib").
+  if (awaitingPayment) {
+    if (awaitingPayment.hours < 24) return { action: "none", stage: "awaiting_payment" };
+    return { action: "soft", stage: "awaiting_payment_stale", limit: 1440 };
+  }
+
+  // An image during an active workflow is almost always the screenshot or a
+  // prescription being sent late — never punish it with a hard wipe.
+  const hasData = !!(collected && (collected.patient_name || collected.contact_number || collected.medical_issue));
+  if (isImageMessage) {
+    if (hasData || activeDept) return { action: "none", stage: "image_in_workflow" };
+    // A photo out of the blue after a long gap → treat as a fresh visitor.
+    return idleMin > 60 ? { action: "hard", stage: "image_cold", limit: 60 } : { action: "none", stage: "image_cold" };
+  }
+
+  if (hasData) {
+    return idleMin > 45
+      ? { action: "soft", stage: "booking", limit: 45 }
+      : { action: "none", stage: "booking" };
+  }
+  if (activeDept) {
+    return idleMin > 20
+      ? { action: "soft", stage: "engaged", limit: 20 }
+      : { action: "none", stage: "engaged" };
+  }
+  // Plain browsing / idle chit-chat — the strict 5-minute rule applies here.
+  return idleMin > 5
+    ? { action: "hard", stage: "browsing", limit: 5 }
+    : { action: "none", stage: "browsing" };
+}
+
+// ===== V2.7: onboarding gate — tutorial video (once ever) + language select =====
+// Called whenever a patient hasn't yet completed onboarding. Sends the
+// tutorial video ONLY the very first time ever for this number, then always
+// follows with (or falls straight to) the language-select message.
+async function onboardOrLanguageGate(to, fromFormatted, req) {
+  if (!getVideoSent(fromFormatted)) {
+    await sendVideo(
+      to,
+      tutorialVideoUrl(req),
+      "🌸 Downtown Family Hospital — this WhatsApp number is Zainab, our AI assistant. Chat naturally in your own words, or use the menu to pick a service. یہ نمبر ہمارا AI اسسٹنٹ زینب ہے — آزادانہ چیٹ کریں یا مینو سے سروس منتخب کریں۔"
+    );
+    await setVideoSent(fromFormatted);
+  }
+  await sendLanguageSelect(to);
+}
+
 import { runWeeklyAnalysis, sendWeeklyReport } from "./weekly-analysis.js";
 
 const app = express();
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+
+// Serve the tutorial video (and any other static assets) publicly — WhatsApp
+// needs a real HTTPS URL to fetch media from, it can't take a local file.
+app.use("/public", express.static(path.join(__dirname, "public")));
+
+// Absolute base URL for this deployment (used to build the video link).
+// Prefer an explicit env var; otherwise derive from the incoming request's
+// own host, which is always correct on Railway (custom domain or not).
+function baseUrl(req) {
+  if (process.env.PUBLIC_BASE_URL) return process.env.PUBLIC_BASE_URL.replace(/\/$/, "");
+  const proto = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  return `${proto}://${req.get("host")}`;
+}
+function tutorialVideoUrl(req) {
+  return `${baseUrl(req)}/public/tutorial-video.mp4`;
+}
 
 // =========================================================
 //  SERVICE OPERATING HOURS (Pakistan Standard Time) — HARD GATE
@@ -356,6 +480,14 @@ app.post("/webhook", async (req, res) => {
 
     if (message.type === "interactive") {
       const id = message.interactive?.list_reply?.id || message.interactive?.button_reply?.id || "";
+      // Safety net: a button/list click should never be possible before
+      // onboarding, but if it somehow arrives first, onboard instead of
+      // processing a menu selection with no video/language on record.
+      if (id !== "lang_ur" && id !== "lang_en" && !getVideoSent(fromFormatted)) {
+        if (adContext) await setPendingAd(fromFormatted, adContext);
+        await onboardOrLanguageGate(from, fromFormatted, req);
+        return;
+      }
       if (id === "lang_ur" || id === "lang_en") {
         await setLang(fromFormatted, id === "lang_en" ? "en" : "ur");
         const v = await bumpMenuCount(fromFormatted);
@@ -399,6 +531,40 @@ app.post("/webhook", async (req, res) => {
     } else if (message.type === "text") {
       patientText = message.text.body;
       const lower0 = patientText.trim().toLowerCase();
+
+      // ===== Non-patient enquiry (jobs, CVs, marketing, vendors, sales) =====
+      // Hard stop: no onboarding, no workflow, no follow-up, no lead saved.
+      if (isNonPatientEnquiry(patientText)) {
+        await sendText(from, NON_PATIENT_REPLY);
+        console.log(`🚫 ${from}: non-patient enquiry filtered — "${patientText.slice(0, 80)}"`);
+        return; // politely end here; brain never sees this message
+      }
+
+      // ===== Manual "how do I use this chatbot" → resend tutorial video =====
+      // Per spec: never auto-resend, but DO resend on explicit request.
+      const howToUse = /(how (do|can) i use|how does this (chatbot|bot|work)|how to (use|book)( this)?( chatbot| service)?|tutorial|instructions?\b.*chatbot|کیسے استعمال|استعمال کرنا|بکنگ کیسے|کیسے بک)/i;
+      if (howToUse.test(lower0)) {
+        await sendVideo(
+          from,
+          tutorialVideoUrl(req),
+          "🌸 Here's a quick guide on using Zainab, our AI assistant — chat naturally or pick a service from the menu."
+        );
+        // fall through — let the normal flow (or brain) still respond helpfully
+      }
+
+      // ===== Universal onboarding gate =====
+      // Nothing else proceeds until (a) the tutorial video has been shown at
+      // least once ever, and (b) a language has been chosen for this session.
+      if (adContext) await setPendingAd(fromFormatted, adContext); // never lose which ad they clicked
+      if (!getVideoSent(fromFormatted)) {
+        await onboardOrLanguageGate(from, fromFormatted, req);
+        return;
+      }
+      if (!getLang(fromFormatted)) {
+        await sendLanguageSelect(from);
+        return;
+      }
+
       // Typed Home also resets
       if (["ہوم", "home", "🏠", "🏠 ہوم", "🏠 home", "menu", "مینو"].includes(lower0)) {
         await setActiveDept(fromFormatted, "");
@@ -411,18 +577,11 @@ app.post("/webhook", async (req, res) => {
       if (["urdu", "اردو"].includes(lower0)) { await setLang(fromFormatted, "ur"); await sendTextWithHome(from, "زبان اردو ہو گئی ✅ بتائیں کیا مدد کروں؟", "ur"); return; }
       // Greeting OR generic Meta-ad auto-message ("How can I get more info?",
       // "which doctor", "hi") → deterministic welcome flow:
-      //   1st contact → warm welcome + language buttons
       //   language known + fresh chat → welcome menu with the services list
       // Specific questions are NOT intercepted — the brain answers directly.
       const greetings = ["hi","hello","hey","salam","aoa","assalamualaikum","assalam o alaikum","السلام علیکم","سلام","اسلام علیکم"];
       const isOpener = greetings.includes(lower0.replace(/[!.،۔]/g, "").trim()) || isGenericAdOpener(patientText);
       if (isOpener) {
-        // Never lose WHICH ad they clicked — park it for after language choice.
-        if (adContext) await setPendingAd(fromFormatted, adContext);
-        if (!getLang(fromFormatted)) {
-          await sendLanguageSelect(from); // very first contact: welcome + language choice
-          return;
-        }
         const hist0 = await loadConversation(fromFormatted);
         if (!hist0 || hist0.length === 0) {
           const v = await bumpMenuCount(fromFormatted);
@@ -435,6 +594,10 @@ app.post("/webhook", async (req, res) => {
       // auto-detects the patient's language (English vs Urdu/Roman Urdu)
       // and reports it via META.lang; we persist it below.
     } else if (message.type === "image") {
+      // Onboarding gate applies even if the very first thing a patient ever
+      // sends is a photo (e.g. a prescription) — video/language come first.
+      if (!getVideoSent(fromFormatted)) { await onboardOrLanguageGate(from, fromFormatted, req); return; }
+      if (!getLang(fromFormatted)) { await sendLanguageSelect(from); return; }
       // Images flow into the AI so she can respond by CONTEXT:
       // medicine/prescription photo → refer to Pharmacy Manager;
       // online-consultation payment screenshot → accept + confirm;
@@ -443,6 +606,8 @@ app.post("/webhook", async (req, res) => {
       patientText = "(📷 مریض نے ایک تصویر بھیجی ہے)";
       isImageMessage = true;
     } else if (message.type === "audio") {
+      if (!getVideoSent(fromFormatted)) { await onboardOrLanguageGate(from, fromFormatted, req); return; }
+      if (!getLang(fromFormatted)) { await sendLanguageSelect(from); return; }
       wasVoice = true;
       console.log(`🎤 ${from}: voice note received, transcribing...`);
       try {
@@ -537,20 +702,48 @@ app.post("/webhook", async (req, res) => {
       return; // don't run the normal AI flow for a correction command
     }
 
-    // ===== 5-minute inactivity reset (rules 6-7): fresh session =====
+    // ===== Smart inactivity reset (tiered — see classifySession above) =====
     // MUST run before history is loaded/used (declared before any use).
-    let sessionReset = false;
+    // The strict 5-minute "forget everything" rule still applies to idle
+    // browsers, but patients mid-booking or mid-payment get a proportionate
+    // grace period and a SOFT reset that preserves what they already told us.
+    let sessionReset = false;   // hard reset → brain treats this as a new visitor
+    let resumeNote = "";        // soft reset → context injected so she resumes gracefully
     const idleMin = minutesSinceLastActivity(fromFormatted);
-    // 30-min threshold (bank transfers/payments routinely take >5 min), and
-    // an incoming IMAGE never triggers a reset — it is usually the payment
-    // screenshot returning after a transfer delay. Resetting here caused
-    // the "re-asks everything after screenshot" bug.
-    if (idleMin !== null && idleMin > 30 && !isImageMessage) {
+    const awaitingPay = getAwaitingPayment(fromFormatted);
+    const collectedNow = getCollected(fromFormatted);
+    const verdict = classifySession({
+      idleMin,
+      activeDept: getActiveDept(fromFormatted),
+      collected: collectedNow,
+      awaitingPayment: awaitingPay,
+      isImageMessage,
+    });
+
+    if (verdict.action === "hard") {
       await setActiveDept(fromFormatted, "");
+      await clearLang(fromFormatted); // force language selection again
+      await setAwaitingPayment(fromFormatted, false);
       try { await clearConversation(fromFormatted); } catch (e) {}
       await clearCollected(fromFormatted); // fresh session — no old personal data
       sessionReset = true;
-      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)} min — session reset to fresh`);
+      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)}min [${verdict.stage}, limit ${verdict.limit}] — HARD reset, back to language select`);
+    } else if (verdict.action === "soft") {
+      // Drop the stale transcript only. Language, department and collected
+      // details survive so nothing already answered is ever asked twice.
+      try { await clearConversation(fromFormatted); } catch (e) {}
+      const known = [];
+      if (collectedNow?.patient_name) known.push(`نام: ${collectedNow.patient_name}`);
+      if (collectedNow?.contact_number) known.push(`نمبر: ${collectedNow.contact_number}`);
+      if (collectedNow?.medical_issue) known.push(`مسئلہ: ${collectedNow.medical_issue}`);
+      resumeNote =
+        `[نظام: مریض ${Math.round(idleMin)} منٹ کے وقفے کے بعد واپس آیا ہے۔ ` +
+        `پرانی گفتگو کا متن حذف ہو چکا ہے مگر یہ تفصیلات پہلے سے موجود ہیں` +
+        (known.length ? ` — ${known.join("، ")}` : "") +
+        `۔ ان میں سے کوئی چیز دوبارہ مت پوچھیں۔ مختصر خیرمقدم کے ساتھ وہیں سے بات آگے بڑھائیں جہاں رکی تھی۔]`;
+      console.log(`⏳ ${fromFormatted}: idle ${Math.round(idleMin)}min [${verdict.stage}, limit ${verdict.limit}] — SOFT reset, context preserved`);
+    } else if (idleMin !== null && idleMin > 5) {
+      console.log(`✅ ${fromFormatted}: idle ${Math.round(idleMin)}min but protected [${verdict.stage}] — no reset`);
     }
     await touchActivity(fromFormatted);
     registerContact(fromFormatted).catch(() => {}); // campaign registry (non-blocking)
@@ -679,6 +872,9 @@ app.post("/webhook", async (req, res) => {
       }
     }
     if (adContext) brainInput = `${adContext}\n\n${brainInput}`;
+    // Soft reset happened → tell Zainab what's already known so she resumes
+    // instead of restarting the questionnaire.
+    if (resumeNote) brainInput = `${resumeNote}\n\n${brainInput}`;
 
     const { reply, meta } = await askBrain(brainInput, knowledgePlus, history);
     // Always-visible lead diagnostics (watch these in Railway logs):
@@ -707,6 +903,22 @@ app.post("/webhook", async (req, res) => {
     if (!safeReply) safeReply = "جی، بتائیں میں آپ کی کیا مدد کر سکتی ہوں؟ 🌸";
     await sendTextWithHome(from, safeReply, lang);
     console.log(`🤖 → ${from}: ${safeReply.slice(0, 60)}...`);
+
+    // ===== Payment-await detection =====
+    // If Zainab just handed over bank details / asked for a screenshot, flag
+    // the session as protected. The patient is about to leave WhatsApp for
+    // their banking app — a timeout wipe at that moment loses a paid lead.
+    // Cleared automatically once the screenshot lands (lead forwarded below).
+    const asksForPayment =
+      /(اسکرین شاٹ|سکرین شاٹ|screenshot)/i.test(safeReply) &&
+      /(بینک|اکاؤنٹ|ادائیگی|منتقل|ٹرانسفر|bank|account|payment|transfer|IBAN|easypaisa|jazzcash)/i.test(safeReply) &&
+      // ...but NOT the "screenshot received" acknowledgement — that's the end
+      // of the payment cycle, not the start of it.
+      !/(موصول ہو گیا|موصول ہوگیا|وصول ہو|received|تصدیق کر رہی)/i.test(safeReply);
+    if (asksForPayment) {
+      await setAwaitingPayment(fromFormatted, true);
+      console.log(`💳 ${fromFormatted}: payment requested — session protected from idle reset (24h)`);
+    }
     // Persist the language the brain detected/used (auto-detection + explicit switches).
     if (meta.lang === "en" || meta.lang === "ur") {
       if (meta.lang !== storedLang) await setLang(fromFormatted, meta.lang);
@@ -838,6 +1050,8 @@ app.post("/webhook", async (req, res) => {
       // (bot re-asked name/age after the payment screenshot). The patient's
       // next message still has full context; questionnaire never reopens.
       await setActiveDept(fromFormatted, "");
+      // Lead delivered → payment cycle complete, release the timeout shield.
+      await setAwaitingPayment(fromFormatted, false);
       // Lead delivered → personal data no longer needed (privacy rule).
       await clearCollected(fromFormatted);
     }
@@ -872,6 +1086,7 @@ app.post("/webhook", async (req, res) => {
             summary: "ONLINE — payment screenshot received (forced server-side)",
           });
           await setActiveDept(fromFormatted, "");
+          await setAwaitingPayment(fromFormatted, false); // screenshot in, shield off
           await clearCollected(fromFormatted);
         }
       }

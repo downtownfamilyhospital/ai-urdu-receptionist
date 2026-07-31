@@ -33,6 +33,24 @@ export async function sendText(to, text) {
   }
 }
 
+// ===== V2.7: tutorial/welcome video =====
+// Sent once to every first-time contact BEFORE the language-select message,
+// and re-sent on demand if a patient asks how to use the chatbot.
+// `videoUrl` must be a publicly-reachable link (see server.js — served from
+// this app's own /public folder over its Railway domain).
+export async function sendVideo(to, videoUrl, caption = "") {
+  try {
+    await api.post("/messages", {
+      messaging_product: "whatsapp",
+      to,
+      type: "video",
+      video: { link: videoUrl, caption },
+    });
+  } catch (err) {
+    console.error("WhatsApp sendVideo error:", err.response?.data || err.message);
+  }
+}
+
 // ===== V2: Interactive messages =====
 
 // Language selection — the very first message to any new patient.

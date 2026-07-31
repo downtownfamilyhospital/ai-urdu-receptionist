@@ -17,6 +17,8 @@ if (!db.data.menuCount) db.data.menuCount = {}; // how many times home menu show
 if (!db.data.collected) db.data.collected = {}; // captured booking fields per patient (never re-ask)
 if (!db.data.lastWeeklyReport) db.data.lastWeeklyReport = ""; // ISO time of last weekly analysis
 if (!db.data.pendingAd) db.data.pendingAd = {}; // ad context parked while patient picks a language
+if (!db.data.videoSent) db.data.videoSent = {}; // tutorial video sent-once tracker
+if (!db.data.awaitingPayment) db.data.awaitingPayment = {}; // payment-screenshot pending since
 
 function nowISO() {
   return new Date().toISOString();
@@ -184,11 +186,56 @@ export async function setLang(whatsapp_number, lang) {
   db.data.langState[normNum(whatsapp_number)] = lang === "en" ? "en" : "ur";
   await db.write();
 }
+export async function clearLang(whatsapp_number) {
+  delete db.data.langState[normNum(whatsapp_number)];
+  await db.write();
+}
 export async function bumpMenuCount(whatsapp_number) {
   const k = normNum(whatsapp_number);
   db.data.menuCount[k] = (db.data.menuCount[k] || 0) + 1;
   await db.write();
   return db.data.menuCount[k];
+}
+
+
+// ===== V2.8: payment-await protection =====
+// When Zainab has given bank details and asked for a payment screenshot, the
+// patient leaves WhatsApp to do a bank transfer. That round trip routinely
+// takes 10–40 minutes and sometimes resumes the next morning. While this
+// flag is set, the session is protected from ANY idle reset — losing their
+// collected details at that exact moment is the worst possible failure.
+// Cleared automatically once the screenshot arrives (lead forwarded).
+export function getAwaitingPayment(whatsapp_number) {
+  const ts = db.data.awaitingPayment[normNum(whatsapp_number)];
+  if (!ts) return null;
+  const hours = (Date.now() - new Date(ts).getTime()) / 3600000;
+  return { since: ts, hours };
+}
+export async function setAwaitingPayment(whatsapp_number, on = true) {
+  const k = normNum(whatsapp_number);
+  if (on) {
+    if (!db.data.awaitingPayment[k]) { // keep the ORIGINAL request time
+      db.data.awaitingPayment[k] = nowISO();
+      await db.write();
+    }
+  } else if (db.data.awaitingPayment[k]) {
+    delete db.data.awaitingPayment[k];
+    await db.write();
+  }
+}
+
+
+// ===== V2.7: tutorial video — sent ONCE ever per WhatsApp number =====
+// Persists across session resets (unlike lang/dept/collected data) — the
+// spec is explicit: "Never send the video again automatically", only a
+// manual "how do I use this" question should trigger a resend (handled in
+// server.js, which calls sendVideo() directly rather than this gate).
+export function getVideoSent(whatsapp_number) {
+  return !!db.data.videoSent[normNum(whatsapp_number)];
+}
+export async function setVideoSent(whatsapp_number) {
+  db.data.videoSent[normNum(whatsapp_number)] = true;
+  await db.write();
 }
 
 
