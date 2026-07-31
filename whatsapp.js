@@ -60,24 +60,19 @@ export async function sendLanguageSelect(to) {
   }
 }
 
-// Rotating welcome texts — never the same greeting twice (variant = menuCount).
+// Single approved welcome message (per owner's instruction):
+// no repeated salam, no self-introduction — thank + one line about DFH + menu.
 const WELCOME_UR = [
-  "السلام علیکم! 🌸\nمیں زینب ہوں — *ڈاؤن ٹاؤن فیملی ہسپتال* میں دل سے خوش آمدید!\n\n✔ ہم ایک *آئی ایچ آر اے رجسٹرڈ ہسپتال* ہیں\n✔ پتہ: بیل روڈ، جی ٹین مرکز، اسلام آباد\n✔ اپنی تمام صحت کی خدمات کی ہم مکمل ذمہ داری لیتے ہیں\n✔ ویب سائٹ: www.dfh.com.pk\n\nآپ مجھ سے کوئی بھی سوال پوچھ سکتے ہیں 🙂 یا نیچے سے اپنی سروس منتخب کریں:",
-  "جی آیاں نوں! 🌸 میں زینب حاضر ہوں۔\nکوئی سوال ہو تو بلا جھجک پوچھیں، یا نیچے دی گئی سروسز میں سے انتخاب فرمائیں:",
-  "خوش آمدید! 🙂 بتائیں آج کس چیز میں مدد کروں؟\nنیچے ہماری سروسز کی فہرست موجود ہے — اپنی ضرورت کی سروس چن لیں:",
-  "السلام علیکم! 🌸 بتائیں، آج کیا مدد چاہیے؟\nہماری سروسز نیچے موجود ہیں — منتخب کر لیں، یا کوئی بھی سوال لکھ دیں:",
+  "ہم سے رابطہ کرنے کا شکریہ! 🌸\n*ڈاؤن ٹاؤن فیملی ہسپتال* (www.dfh.com.pk) جی ٹین مرکز، اسلام آباد میں واقع ایک رجسٹرڈ ہیلتھ کیئر ادارہ ہے — جو ہسپتال میں معیاری طبی خدمات کے ساتھ ساتھ اب آن لائن اور آپ کی دہلیز پر بھی صحت کی سہولیات فراہم کرتا ہے۔\n\nبراہ کرم جاری رکھنے کے لیے نیچے دی گئی سروسز میں سے ایک منتخب کریں:",
 ];
 const WELCOME_EN = [
-  "Welcome! 🌸 I'm Zainab from *Downtown Family Hospital*.\n\n✔ We are an *IHRA Registered Hospital*\n✔ Located at Belle Road, G-10 Markaz, Islamabad\n✔ We take full responsibility for all our health services\n✔ More info: www.dfh.com.pk\n\nAsk me anything 🙂 or select a service below:",
-  "Good to see you again! 🌸 How can I help today?\nFeel free to ask any question, or pick a service from the list below:",
-  "Welcome back! 🙂 What can I do for you today?\nOur services are listed below — choose the one you need:",
-  "Hello again! 🌸 Zainab at your service.\nAsk me anything, or select from our services below:",
+  "Thank you for contacting us. 🌸\n*Downtown Family Hospital* (www.dfh.com.pk) is a registered healthcare setup located at G-10 Markaz, Islamabad — providing quality medical services on site, and now also offering healthcare services online and at your doorstep.\n\nPlease select one of the following services to continue:",
 ];
 
-// Welcome menu: rotating intro + 6-service list (per spec).
+// Welcome menu: fixed message + 6-service list.
 export async function sendWelcomeMenu(to, lang = "ur", variant = 1) {
   const texts = lang === "en" ? WELCOME_EN : WELCOME_UR;
-  const body = variant <= 1 ? texts[0] : texts[1 + ((variant - 2) % (texts.length - 1))];
+  const body = texts[0]; // always the same approved message
   const rows = lang === "en" ? [
     { id: "dept_online", title: "👨‍⚕️ Online Doctor" },
     { id: "dept_pharmacy", title: "Medicine Delivery (24/7)", description: "💊 Open 24 hours, 7 days" },
