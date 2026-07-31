@@ -33,12 +33,58 @@ export async function sendText(to, text) {
   }
 }
 
-// ===== V2.7: tutorial/welcome video =====
-// Sent once to every first-time contact BEFORE the language-select message,
-// and re-sent on demand if a patient asks how to use the chatbot.
-// `videoUrl` must be a publicly-reachable link (see server.js — served from
-// this app's own /public folder over its Railway domain).
-export async function sendVideo(to, videoUrl, caption = "") {
+// ===== V2.7/V2.9: tutorial video =====
+// Sending video by public LINK is fragile: Meta's fetcher must be able to
+// reach the URL from the public internet, and any redirect, cold start or
+// slow first byte makes it give up silently. The reliable path is to UPLOAD
+// the file once to WhatsApp's own media store, get a media_id, and send that.
+// We cache the id (see database.js) and only re-upload when it goes stale.
+
+// Upload a local file to WhatsApp's media store → returns media_id or "".
+export async function uploadVideoToWhatsApp(filePath) {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    const buf = await readFile(filePath);
+    const form = new FormData();
+    form.append("messaging_product", "whatsapp");
+    form.append("type", "video/mp4");
+    form.append("file", new Blob([buf], { type: "video/mp4" }), "tutorial-video.mp4");
+
+    const res = await fetch(
+      `https://graph.facebook.com/v21.0/${PHONE_NUMBER_ID}/media`,
+      { method: "POST", headers: { Authorization: `Bearer ${ACCESS_TOKEN}` }, body: form }
+    );
+    const data = await res.json();
+    if (!res.ok || !data.id) {
+      console.error("❌ video upload failed:", JSON.stringify(data));
+      return "";
+    }
+    console.log(`✅ tutorial video uploaded to WhatsApp — media_id ${data.id}`);
+    return data.id;
+  } catch (e) {
+    console.error("❌ video upload exception:", e.message);
+    return "";
+  }
+}
+
+// Send a video by media_id (preferred) — returns true on success.
+export async function sendVideoById(to, mediaId, caption = "") {
+  try {
+    await api.post("/messages", {
+      messaging_product: "whatsapp",
+      to,
+      type: "video",
+      video: { id: mediaId, caption },
+    });
+    return true;
+  } catch (err) {
+    console.error("❌ sendVideoById error:", JSON.stringify(err.response?.data || err.message));
+    return false;
+  }
+}
+
+// Send a video by public link (fallback) — returns true on success.
+export async function sendVideoByLink(to, videoUrl, caption = "") {
   try {
     await api.post("/messages", {
       messaging_product: "whatsapp",
@@ -46,8 +92,10 @@ export async function sendVideo(to, videoUrl, caption = "") {
       type: "video",
       video: { link: videoUrl, caption },
     });
+    return true;
   } catch (err) {
-    console.error("WhatsApp sendVideo error:", err.response?.data || err.message);
+    console.error("❌ sendVideoByLink error:", JSON.stringify(err.response?.data || err.message));
+    return false;
   }
 }
 

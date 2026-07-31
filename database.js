@@ -19,6 +19,7 @@ if (!db.data.lastWeeklyReport) db.data.lastWeeklyReport = ""; // ISO time of las
 if (!db.data.pendingAd) db.data.pendingAd = {}; // ad context parked while patient picks a language
 if (!db.data.videoSent) db.data.videoSent = {}; // tutorial video sent-once tracker
 if (!db.data.awaitingPayment) db.data.awaitingPayment = {}; // payment-screenshot pending since
+if (db.data.videoMedia === undefined) db.data.videoMedia = null; // cached WhatsApp media_id for tutorial video
 
 function nowISO() {
   return new Date().toISOString();
@@ -195,6 +196,23 @@ export async function bumpMenuCount(whatsapp_number) {
   db.data.menuCount[k] = (db.data.menuCount[k] || 0) + 1;
   await db.write();
   return db.data.menuCount[k];
+}
+
+
+// ===== V2.9: cached WhatsApp media_id for the tutorial video =====
+// Uploading the video on every send would be slow and wasteful. We upload
+// once, cache the id, and refresh it after ~25 days (Meta retains uploaded
+// media for 30). Cleared automatically if a send ever fails with a stale id.
+export function getVideoMediaId() {
+  const rec = db.data.videoMedia;
+  if (!rec?.id) return "";
+  const days = (Date.now() - new Date(rec.uploaded_at).getTime()) / 86400000;
+  if (days > 25) return ""; // treat as expired → re-upload
+  return rec.id;
+}
+export async function setVideoMediaId(id) {
+  db.data.videoMedia = id ? { id, uploaded_at: nowISO() } : null;
+  await db.write();
 }
 
 

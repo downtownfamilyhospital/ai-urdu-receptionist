@@ -35,7 +35,7 @@ try {
 
 import { loadKnowledge } from "./knowledge.js";
 import { askBrain } from "./brain.js";
-import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu, sendVideo } from "./whatsapp.js";
+import { sendText, sendTextWithHome, sendWelcomeMenu, sendLanguageSelect, sendAestheticMenu, sendVideoById, uploadVideoToWhatsApp } from "./whatsapp.js";
 import { chatApp } from "./chatweb.js";
 import { transcribeVoice } from "./voice.js";
 // Personal details (name/address) are never stored — but every contact's
@@ -78,6 +78,8 @@ import {
   clearLang,
   getAwaitingPayment,
   setAwaitingPayment,
+  getVideoMediaId,
+  setVideoMediaId,
 } from "./database.js";
 
 // ===== Meta-ad generic openers =====
@@ -205,12 +207,11 @@ function classifySession({ idleMin, activeDept, collected, awaitingPayment, isIm
 // follows with (or falls straight to) the language-select message.
 async function onboardOrLanguageGate(to, fromFormatted, req) {
   if (!getVideoSent(fromFormatted)) {
-    await sendVideo(
-      to,
-      tutorialVideoUrl(req),
-      "🌸 Downtown Family Hospital — this WhatsApp number is Zainab, our AI assistant. Chat naturally in your own words, or use the menu to pick a service. یہ نمبر ہمارا AI اسسٹنٹ زینب ہے — آزادانہ چیٹ کریں یا مینو سے سروس منتخب کریں۔"
-    );
-    await setVideoSent(fromFormatted);
+    const ok = await sendTutorialVideo(to, req);
+    // CRITICAL: only record it as sent if it actually went out. Marking it
+    // sent on failure is what silently killed the video for everyone.
+    if (ok) await setVideoSent(fromFormatted);
+    else console.warn(`⚠️ ${fromFormatted}: video failed — will retry on next message`);
   }
   await sendLanguageSelect(to);
 }
@@ -235,6 +236,43 @@ function baseUrl(req) {
 }
 function tutorialVideoUrl(req) {
   return `${baseUrl(req)}/public/tutorial-video.mp4`;
+}
+const TUTORIAL_VIDEO_PATH = path.join(__dirname, "public", "tutorial-video.mp4");
+const TUTORIAL_CAPTION =
+  "🌸 Downtown Family Hospital — this WhatsApp number is Zainab, our AI assistant. Chat naturally in your own words, or use the menu to pick a service.\nیہ نمبر ہمارا AI اسسٹنٹ زینب ہے — آزادانہ چیٹ کریں یا مینو سے سروس منتخب کریں۔";
+
+// Send the tutorial video as a REAL, PLAYABLE VIDEO FILE — never as a link.
+// The file is uploaded to WhatsApp's own media store and sent by media_id,
+// which is what makes it appear as an inline video with a play button in the
+// patient's chat. Strategy:
+//   1. Cached media_id  — instant, already uploaded
+//   2. Upload the file  — fresh media_id, then send
+// There is deliberately NO link fallback: sending by URL is what made the
+// video show up as a plain link instead of a playable file.
+async function sendTutorialVideo(to, req) {
+  const fs = await import("node:fs");
+  if (!fs.existsSync(TUTORIAL_VIDEO_PATH)) {
+    console.error(`❌ tutorial video missing on disk at ${TUTORIAL_VIDEO_PATH} — did public/ get committed to GitHub?`);
+    return false;
+  }
+
+  // 1. cached media_id
+  const cachedId = getVideoMediaId();
+  if (cachedId) {
+    if (await sendVideoById(to, cachedId, TUTORIAL_CAPTION)) return true;
+    console.warn("⚠️ cached media_id rejected — clearing and re-uploading");
+    await setVideoMediaId("");
+  }
+
+  // 2. upload the actual file, then send it by its new media_id
+  const newId = await uploadVideoToWhatsApp(TUTORIAL_VIDEO_PATH);
+  if (newId) {
+    await setVideoMediaId(newId);
+    if (await sendVideoById(to, newId, TUTORIAL_CAPTION)) return true;
+  }
+
+  console.error("❌ tutorial video could not be uploaded/sent — see Meta error above");
+  return false;
 }
 
 // =========================================================
@@ -411,6 +449,38 @@ app.get("/", (req, res) => {
 
 // Diagnostic: test outbound network to Google + OpenAI. Visit /diag
 // in your browser to see if the container can reach the internet.
+// Video pipeline diagnostic. Open in a browser:
+//   /diag/video              → is the file present, is the URL reachable?
+//   /diag/video?upload=1     → force an upload, show the media_id or Meta's error
+//   /diag/video?to=923001234567 → actually send the video to that number
+app.get("/diag/video", async (req, res) => {
+  const fs = await import("node:fs");
+  const out = { time: new Date().toISOString() };
+  out.expected_path = TUTORIAL_VIDEO_PATH;
+  out.file_exists = fs.existsSync(TUTORIAL_VIDEO_PATH);
+  out.file_size_bytes = out.file_exists ? fs.statSync(TUTORIAL_VIDEO_PATH).size : 0;
+  out.public_url = tutorialVideoUrl(req);
+  out.cached_media_id = getVideoMediaId() || "(none)";
+
+  // Can the outside world actually fetch the URL? (this is what Meta does)
+  try {
+    const r = await fetch(out.public_url, { method: "HEAD" });
+    out.url_reachable = `${r.status} ${r.headers.get("content-type") || ""} ${r.headers.get("content-length") || ""}`;
+  } catch (e) {
+    out.url_reachable = `FAIL: ${e.message}`;
+  }
+
+  if (req.query.upload) {
+    const id = await uploadVideoToWhatsApp(TUTORIAL_VIDEO_PATH);
+    out.upload_result = id || "FAILED — check Railway logs for Meta's error";
+    if (id) await setVideoMediaId(id);
+  }
+  if (req.query.to) {
+    out.send_result = (await sendTutorialVideo(String(req.query.to), req)) ? "SENT ✅" : "FAILED ❌";
+  }
+  res.json(out);
+});
+
 app.get("/diag", async (req, res) => {
   const out = {};
   const test = async (name, url) => {
@@ -544,11 +614,9 @@ app.post("/webhook", async (req, res) => {
       // Per spec: never auto-resend, but DO resend on explicit request.
       const howToUse = /(how (do|can) i use|how does this (chatbot|bot|work)|how to (use|book)( this)?( chatbot| service)?|tutorial|instructions?\b.*chatbot|کیسے استعمال|استعمال کرنا|بکنگ کیسے|کیسے بک)/i;
       if (howToUse.test(lower0)) {
-        await sendVideo(
-          from,
-          tutorialVideoUrl(req),
-          "🌸 Here's a quick guide on using Zainab, our AI assistant — chat naturally or pick a service from the menu."
-        );
+        console.log(`📹 ${from}: asked how to use the chatbot — resending tutorial video`);
+        const ok = await sendTutorialVideo(from, req);
+        if (ok) await setVideoSent(fromFormatted); // covers a first-timer who asks straight away
         // fall through — let the normal flow (or brain) still respond helpfully
       }
 
@@ -633,8 +701,22 @@ app.post("/webhook", async (req, res) => {
         );
         return;
       }
+    } else if (message.type === "button") {
+      // Template quick-replies and some Meta ad CTAs arrive as type "button".
+      // Previously these fell into the catch-all below and got a generic text
+      // with NO onboarding — no video, no language select. Treat them as text.
+      patientText = message.button?.text || message.button?.payload || "";
+      if (adContext) await setPendingAd(fromFormatted, adContext);
+      if (!getVideoSent(fromFormatted)) { await onboardOrLanguageGate(from, fromFormatted, req); return; }
+      if (!getLang(fromFormatted)) { await sendLanguageSelect(from); return; }
+      if (!patientText.trim()) {
+        const v = await bumpMenuCount(fromFormatted);
+        await sendWelcomeMenu(from, getLang(fromFormatted), v);
+        return;
+      }
     } else if (message.type === "location") {
       // Patient shared a GPS location pin — save it to their record.
+      if (!getVideoSent(fromFormatted)) { await onboardOrLanguageGate(from, fromFormatted, req); return; }
       const lat = message.location?.latitude;
       const lng = message.location?.longitude;
       const pin = lat && lng ? `https://maps.google.com/?q=${lat},${lng}` : "";
@@ -648,7 +730,10 @@ app.post("/webhook", async (req, res) => {
       );
       return;
     } else {
-      // images, documents, etc. — not handled yet
+      // documents, stickers, contacts, etc. — not handled yet.
+      // Still honour onboarding so a first-timer never misses the video.
+      console.log(`❓ ${from}: unhandled message type "${message.type}"`);
+      if (!getVideoSent(fromFormatted)) { await onboardOrLanguageGate(from, fromFormatted, req); return; }
       await sendText(
         from,
         "السلام علیکم! آپ مجھے لکھ کر یا وائس میسج کے ذریعے سوال بھیج سکتے ہیں۔ شکریہ۔"
