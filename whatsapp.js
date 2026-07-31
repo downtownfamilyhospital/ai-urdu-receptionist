@@ -76,11 +76,13 @@ export async function uploadVideoToWhatsApp(fileOrBuffer) {
 // Send a video by media_id (preferred) — returns true on success.
 export async function sendVideoById(to, mediaId, caption = "") {
   try {
+    const video = { id: mediaId };
+    if (caption) video.caption = caption; // omit entirely when empty — bare video
     await api.post("/messages", {
       messaging_product: "whatsapp",
       to,
       type: "video",
-      video: { id: mediaId, caption },
+      video,
     });
     return true;
   } catch (err) {
@@ -92,11 +94,13 @@ export async function sendVideoById(to, mediaId, caption = "") {
 // Send a video by public link (fallback) — returns true on success.
 export async function sendVideoByLink(to, videoUrl, caption = "") {
   try {
+    const video = { link: videoUrl };
+    if (caption) video.caption = caption;
     await api.post("/messages", {
       messaging_product: "whatsapp",
       to,
       type: "video",
-      video: { link: videoUrl, caption },
+      video,
     });
     return true;
   } catch (err) {

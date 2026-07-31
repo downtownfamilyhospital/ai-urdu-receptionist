@@ -238,8 +238,9 @@ function tutorialVideoUrl(req) {
   return `${baseUrl(req)}/public/tutorial-video.mp4`;
 }
 const TUTORIAL_VIDEO_PATH = path.join(__dirname, "public", "tutorial-video.mp4");
-const TUTORIAL_CAPTION =
-  "🌸 Downtown Family Hospital — this WhatsApp number is Zainab, our AI assistant. Chat naturally in your own words, or use the menu to pick a service.\nیہ نمبر ہمارا AI اسسٹنٹ زینب ہے — آزادانہ چیٹ کریں یا مینو سے سروس منتخب کریں۔";
+// No caption — owner wants the video to arrive completely bare, with the
+// language-selection message following immediately as the next message.
+const TUTORIAL_CAPTION = "";
 
 // Send the tutorial video as a REAL, PLAYABLE VIDEO FILE — never as a link.
 // The file is uploaded to WhatsApp's own media store and sent by media_id,
